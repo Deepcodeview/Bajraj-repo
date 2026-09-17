@@ -1,0 +1,720 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model ai_events {
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String                      @db.Uuid
+  event_id                  String                      @db.VarChar(100)
+  event_type                String                      @db.VarChar(100)
+  store_id                  String                      @db.Uuid
+  camera_id                 String                      @db.Uuid
+  zone_id                   String?                     @db.Uuid
+  subject_id                String?                     @db.VarChar(150)
+  employee_id               String?                     @db.Uuid
+  customer_session_id       String?                     @db.Uuid
+  employee_session_id       String?                     @db.Uuid
+  event_timestamp           DateTime                    @db.Timestamptz(6)
+  confidence                Decimal?                    @db.Decimal(5, 4)
+  duration_seconds          Decimal?                    @db.Decimal(12, 2)
+  severity                  String?                     @db.VarChar(20)
+  correlation_id            String?                     @db.VarChar(150)
+  model_name                String?                     @db.VarChar(100)
+  model_version              String?                    @db.VarChar(100)
+  raw_payload               Json?
+  normalized_payload        Json?
+  processing_status         String                      @default("PENDING") @db.VarChar(30)
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  cameras                   cameras                     @relation(fields: [camera_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ai_events_camera")
+  customer_sessions         customer_sessions?          @relation(fields: [customer_session_id], references: [id], onUpdate: NoAction, map: "fk_ai_events_customer_session")
+  employees                 employees?                  @relation(fields: [employee_id], references: [id], onUpdate: NoAction, map: "fk_ai_events_employee")
+  employee_sessions         employee_sessions?          @relation(fields: [employee_session_id], references: [id], onUpdate: NoAction, map: "fk_ai_events_employee_session")
+  organizations             organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ai_events_org")
+  stores                    stores                      @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ai_events_store")
+  zones                     zones?                      @relation(fields: [zone_id], references: [id], onUpdate: NoAction, map: "fk_ai_events_zone")
+  alerts                    alerts[]
+  event_evidence            event_evidence[]
+  evidence                  evidence[]
+  exceptions                exceptions[]
+  transaction_state_history transaction_state_history[]
+
+  @@unique([organization_id, event_id], map: "uq_ai_event_per_org")
+  @@index([camera_id], map: "idx_ai_events_camera")
+  @@index([correlation_id], map: "idx_ai_events_correlation")
+  @@index([event_type], map: "idx_ai_events_event_type")
+  @@index([organization_id], map: "idx_ai_events_org")
+  @@index([store_id], map: "idx_ai_events_store")
+  @@index([event_timestamp], map: "idx_ai_events_timestamp")
+  @@index([zone_id], map: "idx_ai_events_zone")
+}
+
+model alert_status_history {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  alert_id        String        @db.Uuid
+  previous_status String?       @db.VarChar(30)
+  new_status      String        @db.VarChar(30)
+  changed_by      String?       @db.Uuid
+  remarks         String?
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  alerts          alerts        @relation(fields: [alert_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alert_history_alert")
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alert_history_org")
+  users           users?        @relation(fields: [changed_by], references: [id], onUpdate: NoAction, map: "fk_alert_history_user")
+}
+
+model alerts {
+  id                                  String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                     String                 @db.Uuid
+  store_id                            String                 @db.Uuid
+  alert_code                          String                 @db.VarChar(100)
+  event_id                            String?                @db.Uuid
+  customer_session_id                 String?                @db.Uuid
+  employee_session_id                 String?                @db.Uuid
+  transaction_id                      String?                @db.Uuid
+  business_rule_id                    String?                @db.Uuid
+  severity                            String                 @default("MEDIUM") @db.VarChar(20)
+  title                               String                 @db.VarChar(255)
+  description                         String?
+  status                              String                 @default("OPEN") @db.VarChar(30)
+  assigned_to                         String?                @db.Uuid
+  acknowledged_by                     String?                @db.Uuid
+  acknowledged_at                     DateTime?              @db.Timestamptz(6)
+  resolved_by                         String?                @db.Uuid
+  resolved_at                         DateTime?              @db.Timestamptz(6)
+  resolution_notes                    String?
+  created_at                          DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                          DateTime               @default(now()) @db.Timestamptz(6)
+  alert_status_history                alert_status_history[]
+  users_alerts_acknowledged_byTousers users?                 @relation("alerts_acknowledged_byTousers", fields: [acknowledged_by], references: [id], onUpdate: NoAction, map: "fk_alerts_acknowledged_by")
+  users_alerts_assigned_toTousers     users?                 @relation("alerts_assigned_toTousers", fields: [assigned_to], references: [id], onUpdate: NoAction, map: "fk_alerts_assigned_to")
+  business_rules                      business_rules?        @relation(fields: [business_rule_id], references: [id], onUpdate: NoAction, map: "fk_alerts_business_rule")
+  customer_sessions                   customer_sessions?     @relation(fields: [customer_session_id], references: [id], onUpdate: NoAction, map: "fk_alerts_customer_session")
+  employee_sessions                   employee_sessions?     @relation(fields: [employee_session_id], references: [id], onUpdate: NoAction, map: "fk_alerts_employee_session")
+  ai_events                           ai_events?             @relation(fields: [event_id], references: [id], onUpdate: NoAction, map: "fk_alerts_event")
+  organizations                       organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alerts_org")
+  users_alerts_resolved_byTousers     users?                 @relation("alerts_resolved_byTousers", fields: [resolved_by], references: [id], onUpdate: NoAction, map: "fk_alerts_resolved_by")
+  stores                              stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alerts_store")
+  transactions                        transactions?          @relation(fields: [transaction_id], references: [id], onUpdate: NoAction, map: "fk_alerts_transaction")
+  evidence                            evidence[]
+
+  @@index([organization_id], map: "idx_alerts_org")
+  @@index([severity], map: "idx_alerts_severity")
+  @@index([status], map: "idx_alerts_status")
+  @@index([store_id], map: "idx_alerts_store")
+}
+
+model audit_logs {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String?        @db.Uuid
+  user_id         String?        @db.Uuid
+  action          String         @db.VarChar(100)
+  entity_type     String?        @db.VarChar(100)
+  entity_id       String?        @db.VarChar(100)
+  old_values      Json?
+  new_values      Json?
+  metadata        Json?
+  ip_address      String?        @db.Inet
+  user_agent      String?
+  request_id      String?        @db.VarChar(100)
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  organizations   organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "fk_audit_org")
+  users           users?         @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "fk_audit_user")
+
+  @@index([entity_type, entity_id], map: "idx_audit_logs_entity")
+  @@index([organization_id], map: "idx_audit_logs_org")
+}
+
+model business_rules {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String        @db.Uuid
+  store_id         String?       @db.Uuid
+  zone_id          String?       @db.Uuid
+  rule_code        String        @db.VarChar(100)
+  name             String        @db.VarChar(255)
+  rule_type        String        @db.VarChar(100)
+  event_type       String?       @db.VarChar(100)
+  condition_config Json?
+  threshold_config Json?
+  severity         String?       @default("MEDIUM") @db.VarChar(20)
+  is_active        Boolean       @default(true)
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  alerts           alerts[]
+  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rules_organization")
+  stores           stores?       @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rules_store")
+  zones            zones?        @relation(fields: [zone_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rules_zone")
+
+  @@unique([organization_id, rule_code], map: "uq_rule_code_per_org")
+}
+
+model cameras {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String        @db.Uuid
+  store_id         String        @db.Uuid
+  zone_id          String?       @db.Uuid
+  camera_code      String        @db.VarChar(100)
+  name             String        @db.VarChar(255)
+  stream_reference String?
+  resolution       String?       @db.VarChar(50)
+  fps              Decimal?      @db.Decimal(10, 2)
+  health_status    String?       @default("OFFLINE") @db.VarChar(30)
+  last_seen_at     DateTime?     @db.Timestamptz(6)
+  status           String        @default("ACTIVE") @db.VarChar(30)
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  ai_events        ai_events[]
+  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_cameras_organization")
+  stores           stores        @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_cameras_store")
+  zones            zones?        @relation(fields: [zone_id], references: [id], onUpdate: NoAction, map: "fk_cameras_zone")
+
+  @@unique([store_id, camera_code], map: "uq_camera_code_per_store")
+  @@index([store_id], map: "idx_cameras_store")
+}
+
+model customer_sessions {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id       String         @db.Uuid
+  store_id              String         @db.Uuid
+  session_code          String         @db.VarChar(100)
+  customer_tracking_id  String?        @db.VarChar(150)
+  current_zone_id       String?        @db.Uuid
+  assigned_employee_id  String?        @db.Uuid
+  start_time            DateTime       @default(now()) @db.Timestamptz(6)
+  end_time              DateTime?      @db.Timestamptz(6)
+  status                String         @default("ACTIVE") @db.VarChar(30)
+  response_time_seconds Decimal?       @db.Decimal(12, 2)
+  created_at            DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime       @default(now()) @db.Timestamptz(6)
+  ai_events             ai_events[]
+  alerts                alerts[]
+  employees             employees?     @relation(fields: [assigned_employee_id], references: [id], onUpdate: NoAction, map: "fk_customer_sessions_employee")
+  organizations         organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_customer_sessions_org")
+  stores                stores         @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_customer_sessions_store")
+  zones                 zones?         @relation(fields: [current_zone_id], references: [id], onUpdate: NoAction, map: "fk_customer_sessions_zone")
+  exceptions            exceptions[]
+  transactions          transactions[]
+
+  @@unique([organization_id, session_code], map: "uq_customer_session_code")
+  @@index([store_id], map: "idx_customer_sessions_store")
+  @@index([customer_tracking_id], map: "idx_customer_sessions_tracking")
+}
+
+model employee_sessions {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  employee_id     String        @db.Uuid
+  store_id        String        @db.Uuid
+  session_start   DateTime      @default(now()) @db.Timestamptz(6)
+  session_end     DateTime?     @db.Timestamptz(6)
+  shift_start     DateTime?     @db.Timestamptz(6)
+  shift_end       DateTime?     @db.Timestamptz(6)
+  status          String        @default("ACTIVE") @db.VarChar(30)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  ai_events       ai_events[]
+  alerts          alerts[]
+  employees       employees     @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employee_sessions_employee")
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employee_sessions_org")
+  stores          stores        @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employee_sessions_store")
+  exceptions      exceptions[]
+
+  @@index([employee_id], map: "idx_employee_sessions_employee")
+}
+
+model employee_zone_assignments {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  employee_id     String        @db.Uuid
+  zone_id         String        @db.Uuid
+  assigned_from   DateTime?     @default(now()) @db.Timestamptz(6)
+  assigned_to     DateTime?     @db.Timestamptz(6)
+  is_primary      Boolean       @default(false)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  employees       employees     @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employee_zone_employee")
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employee_zone_org")
+  zones           zones         @relation(fields: [zone_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employee_zone_zone")
+}
+
+model employees {
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String                      @db.Uuid
+  store_id                  String                      @db.Uuid
+  erp_employee_id           String?                     @db.VarChar(100)
+  employee_code             String                      @db.VarChar(100)
+  first_name                String                      @db.VarChar(100)
+  last_name                 String?                     @db.VarChar(100)
+  phone                     String?                     @db.VarChar(30)
+  email                     String?                     @db.VarChar(255)
+  shift_start               DateTime?                   @db.Time(6)
+  shift_end                 DateTime?                   @db.Time(6)
+  status                    String                      @default("ACTIVE") @db.VarChar(30)
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  ai_events                 ai_events[]
+  customer_sessions         customer_sessions[]
+  employee_sessions         employee_sessions[]
+  employee_zone_assignments employee_zone_assignments[]
+  organizations             organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employees_organization")
+  stores                    stores                      @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_employees_store")
+
+  @@unique([organization_id, employee_code], map: "uq_employee_code_per_org")
+  @@unique([organization_id, erp_employee_id], map: "uq_erp_employee_per_org")
+  @@index([store_id], map: "idx_employees_store")
+}
+
+model event_evidence {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id    String    @db.Uuid
+  evidence_id String    @db.Uuid
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  ai_events   ai_events @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_evidence_event")
+  evidence    evidence  @relation(fields: [evidence_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_evidence_evidence")
+
+  @@unique([event_id, evidence_id], map: "uq_event_evidence")
+}
+
+model evidence {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                 @db.Uuid
+  event_id             String                 @db.Uuid
+  alert_id             String?                @db.Uuid
+  evidence_type        String                 @db.VarChar(50)
+  storage_provider     String?                @db.VarChar(50)
+  storage_reference    String
+  file_name            String?                @db.VarChar(255)
+  content_type         String?                @db.VarChar(100)
+  file_size            BigInt?
+  start_timestamp      DateTime?              @db.Timestamptz(6)
+  end_timestamp        DateTime?              @db.Timestamptz(6)
+  retention_until      DateTime?              @db.Timestamptz(6)
+  status               String                 @default("PENDING") @db.VarChar(30)
+  failure_reason       String?
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  event_evidence       event_evidence[]
+  alerts               alerts?                @relation(fields: [alert_id], references: [id], onUpdate: NoAction, map: "fk_evidence_alert")
+  ai_events            ai_events              @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidence_event")
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidence_org")
+  evidence_access_logs evidence_access_logs[]
+
+  @@index([event_id], map: "idx_evidence_event")
+}
+
+model evidence_access_logs {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  evidence_id     String        @db.Uuid
+  user_id         String?       @db.Uuid
+  access_type     String        @db.VarChar(50)
+  ip_address      String?       @db.Inet
+  accessed_at     DateTime      @default(now()) @db.Timestamptz(6)
+  evidence        evidence      @relation(fields: [evidence_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidence_access_evidence")
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidence_access_org")
+  users           users?        @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "fk_evidence_access_user")
+}
+
+model exceptions {
+  id                                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                     String             @db.Uuid
+  exception_code                      String?            @db.VarChar(100)
+  exception_type                      String             @db.VarChar(100)
+  severity                            String             @default("MEDIUM") @db.VarChar(20)
+  event_id                            String?            @db.Uuid
+  transaction_id                      String?            @db.Uuid
+  customer_session_id                 String?            @db.Uuid
+  employee_session_id                 String?            @db.Uuid
+  description                         String?
+  status                              String             @default("OPEN") @db.VarChar(30)
+  assigned_to                         String?            @db.Uuid
+  resolved_by                         String?            @db.Uuid
+  resolved_at                         DateTime?          @db.Timestamptz(6)
+  created_at                          DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                          DateTime           @default(now()) @db.Timestamptz(6)
+  users_exceptions_assigned_toTousers users?             @relation("exceptions_assigned_toTousers", fields: [assigned_to], references: [id], onUpdate: NoAction, map: "fk_exceptions_assigned_to")
+  customer_sessions                   customer_sessions? @relation(fields: [customer_session_id], references: [id], onUpdate: NoAction, map: "fk_exceptions_customer_session")
+  employee_sessions                   employee_sessions? @relation(fields: [employee_session_id], references: [id], onUpdate: NoAction, map: "fk_exceptions_employee_session")
+  ai_events                           ai_events?         @relation(fields: [event_id], references: [id], onUpdate: NoAction, map: "fk_exceptions_event")
+  organizations                       organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_exceptions_org")
+  users_exceptions_resolved_byTousers users?             @relation("exceptions_resolved_byTousers", fields: [resolved_by], references: [id], onUpdate: NoAction, map: "fk_exceptions_resolved_by")
+  transactions                        transactions?      @relation(fields: [transaction_id], references: [id], onUpdate: NoAction, map: "fk_exceptions_transaction")
+
+  @@index([organization_id], map: "idx_exceptions_org")
+  @@index([status], map: "idx_exceptions_status")
+}
+
+model idempotency_keys {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  idempotency_key String        @db.VarChar(255)
+  source          String?       @db.VarChar(100)
+  resource_type   String?       @db.VarChar(100)
+  request_hash    String?       @db.VarChar(255)
+  response_data   Json?
+  status          String        @default("PROCESSING") @db.VarChar(30)
+  expires_at      DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_idempotency_org")
+
+  @@unique([organization_id, idempotency_key], map: "uq_idempotency_key")
+}
+
+model integration_logs {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String        @db.Uuid
+  integration_type String        @db.VarChar(100)
+  operation        String?       @db.VarChar(100)
+  request_payload  Json?
+  response_payload Json?
+  status           String        @default("PENDING") @db.VarChar(30)
+  error_message    String?
+  retry_count      Int           @default(0)
+  next_retry_at    DateTime?     @db.Timestamptz(6)
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_integration_logs_org")
+
+  @@index([status], map: "idx_integration_logs_status")
+}
+
+model organizations {
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_code         String                      @unique @db.VarChar(50)
+  name                      String                      @db.VarChar(255)
+  legal_name                String?                     @db.VarChar(255)
+  email                     String?                     @db.VarChar(255)
+  phone                     String?                     @db.VarChar(30)
+  address_line1             String?                     @db.VarChar(255)
+  address_line2             String?                     @db.VarChar(255)
+  city                      String?                     @db.VarChar(100)
+  state                     String?                     @db.VarChar(100)
+  country                   String?                     @db.VarChar(100)
+  postal_code               String?                     @db.VarChar(20)
+  timezone                  String?                     @default("Asia/Kolkata") @db.VarChar(100)
+  status                    String                      @default("ACTIVE") @db.VarChar(30)
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  ai_events                 ai_events[]
+  alert_status_history      alert_status_history[]
+  alerts                    alerts[]
+  audit_logs                audit_logs[]
+  business_rules            business_rules[]
+  cameras                   cameras[]
+  customer_sessions         customer_sessions[]
+  employee_sessions         employee_sessions[]
+  employee_zone_assignments employee_zone_assignments[]
+  employees                 employees[]
+  evidence                  evidence[]
+  evidence_access_logs      evidence_access_logs[]
+  exceptions                exceptions[]
+  idempotency_keys          idempotency_keys[]
+  integration_logs          integration_logs[]
+  payments                  payments[]
+  pos_integrations          pos_integrations[]
+  products                  products[]
+  reconciliations           reconciliations[]
+  retention_policies        retention_policies[]
+  roles                     roles[]
+  stores                    stores[]
+  transaction_items         transaction_items[]
+  transaction_state_history transaction_state_history[]
+  transactions              transactions[]
+  users                     users[]
+  zones                     zones[]
+}
+
+model payments {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String        @db.Uuid
+  transaction_id      String        @db.Uuid
+  external_payment_id String?       @db.VarChar(150)
+  payment_reference   String?       @db.VarChar(150)
+  payment_mode        String        @db.VarChar(50)
+  amount              Decimal       @db.Decimal(14, 2)
+  currency            String?       @default("INR") @db.VarChar(10)
+  status              String        @default("PENDING") @db.VarChar(30)
+  payment_timestamp   DateTime?     @db.Timestamptz(6)
+  source_system       String?       @db.VarChar(100)
+  raw_payload         Json?
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime      @default(now()) @db.Timestamptz(6)
+  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_payments_org")
+  transactions        transactions  @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_payments_transaction")
+
+  @@index([transaction_id], map: "idx_payments_transaction")
+}
+
+model permissions {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  module           String             @db.VarChar(100)
+  action           String             @db.VarChar(50)
+  code             String             @unique @db.VarChar(150)
+  description      String?
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  role_permissions role_permissions[]
+}
+
+model pos_integrations {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String        @db.Uuid
+  provider_name       String        @db.VarChar(100)
+  base_url            String?
+  authentication_type String?       @db.VarChar(50)
+  config              Json?
+  status              String        @default("ACTIVE") @db.VarChar(30)
+  last_sync_at        DateTime?     @db.Timestamptz(6)
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime      @default(now()) @db.Timestamptz(6)
+  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pos_integrations_org")
+}
+
+model products {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String              @db.Uuid
+  external_product_id String?             @db.VarChar(150)
+  sku                 String              @db.VarChar(100)
+  name                String              @db.VarChar(255)
+  description         String?
+  category            String?             @db.VarChar(100)
+  unit                String?             @db.VarChar(30)
+  status              String              @default("ACTIVE") @db.VarChar(30)
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime            @default(now()) @db.Timestamptz(6)
+  organizations       organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_products_org")
+  transaction_items   transaction_items[]
+
+  @@unique([organization_id, sku], map: "uq_product_sku_per_org")
+}
+
+model reconciliations {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String        @db.Uuid
+  transaction_id      String        @db.Uuid
+  reconciliation_type String        @db.VarChar(100)
+  expected_value      Json?
+  observed_value      Json?
+  variance            Json?
+  status              String        @default("PENDING") @db.VarChar(30)
+  exception_reason    String?
+  resolved_by         String?       @db.Uuid
+  resolved_at         DateTime?     @db.Timestamptz(6)
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime      @default(now()) @db.Timestamptz(6)
+  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_reconciliations_org")
+  users               users?        @relation(fields: [resolved_by], references: [id], onUpdate: NoAction, map: "fk_reconciliations_resolved_by")
+  transactions        transactions  @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_reconciliations_transaction")
+}
+
+model retention_policies {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String?        @db.Uuid
+  resource_type   String         @db.VarChar(100)
+  retention_days  Int
+  action          String         @default("DELETE") @db.VarChar(50)
+  is_active       Boolean        @default(true)
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime       @default(now()) @db.Timestamptz(6)
+  organizations   organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_retention_org")
+}
+
+model role_permissions {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id       String      @db.Uuid
+  permission_id String      @db.Uuid
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_permission")
+  roles         roles       @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_role")
+
+  @@unique([role_id, permission_id], map: "uq_role_permission")
+}
+
+model roles {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String?            @db.Uuid
+  name             String             @db.VarChar(100)
+  code             String             @db.VarChar(50)
+  description      String?
+  is_system_role   Boolean            @default(false)
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  role_permissions role_permissions[]
+  organizations    organizations?     @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_roles_organization")
+  user_roles       user_roles[]
+}
+
+model stores {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id   String              @db.Uuid
+  store_code        String              @db.VarChar(50)
+  name              String              @db.VarChar(255)
+  address_line1     String?             @db.VarChar(255)
+  address_line2     String?             @db.VarChar(255)
+  city              String?             @db.VarChar(100)
+  state             String?             @db.VarChar(100)
+  country           String?             @db.VarChar(100)
+  postal_code       String?             @db.VarChar(20)
+  latitude          Decimal?            @db.Decimal(10, 7)
+  longitude         Decimal?            @db.Decimal(10, 7)
+  timezone          String?             @default("Asia/Kolkata") @db.VarChar(100)
+  status            String              @default("ACTIVE") @db.VarChar(30)
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime            @default(now()) @db.Timestamptz(6)
+  ai_events         ai_events[]
+  alerts            alerts[]
+  business_rules    business_rules[]
+  cameras           cameras[]
+  customer_sessions customer_sessions[]
+  employee_sessions employee_sessions[]
+  employees         employees[]
+  organizations     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_stores_organization")
+  transactions      transactions[]
+  zones             zones[]
+  users             users[]
+
+  @@unique([organization_id, store_code], map: "uq_store_code_per_org")
+  @@index([organization_id], map: "idx_stores_organization")
+}
+
+model transaction_items {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  transaction_id  String        @db.Uuid
+  product_id      String?       @db.Uuid
+  sku             String?       @db.VarChar(100)
+  product_name    String        @db.VarChar(255)
+  quantity        Decimal       @default(1) @db.Decimal(14, 3)
+  unit_price      Decimal       @default(0) @db.Decimal(14, 2)
+  discount_amount Decimal?      @default(0) @db.Decimal(14, 2)
+  total_price     Decimal       @default(0) @db.Decimal(14, 2)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_transaction_items_org")
+  products        products?     @relation(fields: [product_id], references: [id], onUpdate: NoAction, map: "fk_transaction_items_product")
+  transactions    transactions  @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_transaction_items_transaction")
+
+  @@index([transaction_id], map: "idx_transaction_items_transaction")
+}
+
+model transaction_state_history {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  transaction_id  String        @db.Uuid
+  previous_state  String?       @db.VarChar(50)
+  new_state       String        @db.VarChar(50)
+  event_id        String?       @db.Uuid
+  source          String?       @db.VarChar(50)
+  metadata        Json?
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  ai_events       ai_events?    @relation(fields: [event_id], references: [id], onUpdate: NoAction, map: "fk_transaction_history_event")
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_transaction_history_org")
+  transactions    transactions  @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_transaction_history_transaction")
+}
+
+model transactions {
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String                      @db.Uuid
+  store_id                  String                      @db.Uuid
+  customer_session_id       String?                     @db.Uuid
+  transaction_code          String                      @db.VarChar(100)
+  external_transaction_id   String?                     @db.VarChar(150)
+  invoice_number            String?                     @db.VarChar(150)
+  pos_reference             String?                     @db.VarChar(150)
+  subtotal_amount           Decimal?                    @default(0) @db.Decimal(14, 2)
+  discount_amount           Decimal?                    @default(0) @db.Decimal(14, 2)
+  tax_amount                Decimal?                    @default(0) @db.Decimal(14, 2)
+  total_amount              Decimal                     @default(0) @db.Decimal(14, 2)
+  currency                  String?                     @default("INR") @db.VarChar(10)
+  status                    String                      @default("OPEN") @db.VarChar(50)
+  transaction_timestamp     DateTime?                   @default(now()) @db.Timestamptz(6)
+  source_system             String?                     @db.VarChar(100)
+  raw_payload               Json?
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  alerts                    alerts[]
+  exceptions                exceptions[]
+  payments                  payments[]
+  reconciliations           reconciliations[]
+  transaction_items         transaction_items[]
+  transaction_state_history transaction_state_history[]
+  customer_sessions         customer_sessions?          @relation(fields: [customer_session_id], references: [id], onUpdate: NoAction, map: "fk_transactions_customer_session")
+  organizations             organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_transactions_org")
+  stores                    stores                      @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_transactions_store")
+
+  @@unique([organization_id, transaction_code], map: "uq_transaction_code_per_org")
+  @@index([organization_id], map: "idx_transactions_org")
+  @@index([store_id], map: "idx_transactions_store")
+  @@index([transaction_timestamp], map: "idx_transactions_timestamp")
+}
+
+model user_roles {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  role_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  roles      roles    @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_roles_role")
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_roles_user")
+
+  @@unique([user_id, role_id], map: "uq_user_role")
+}
+
+model users {
+  id                                       String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                          String                 @db.Uuid
+  user_code                                String                 @db.VarChar(50)
+  first_name                               String                 @db.VarChar(100)
+  last_name                                String?                @db.VarChar(100)
+  email                                    String                 @db.VarChar(255)
+  phone                                    String?                @db.VarChar(30)
+  password_hash                            String
+  status                                   String                 @default("ACTIVE") @db.VarChar(30)
+  last_login_at                            DateTime?              @db.Timestamptz(6)
+  created_at                               DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                               DateTime               @default(now()) @db.Timestamptz(6)
+  deleted_at                               DateTime?              @db.Timestamptz(6)
+  alert_status_history                     alert_status_history[]
+  alerts_alerts_acknowledged_byTousers     alerts[]               @relation("alerts_acknowledged_byTousers")
+  alerts_alerts_assigned_toTousers         alerts[]               @relation("alerts_assigned_toTousers")
+  alerts_alerts_resolved_byTousers         alerts[]               @relation("alerts_resolved_byTousers")
+  audit_logs                               audit_logs[]
+  evidence_access_logs                     evidence_access_logs[]
+  exceptions_exceptions_assigned_toTousers exceptions[]           @relation("exceptions_assigned_toTousers")
+  exceptions_exceptions_resolved_byTousers exceptions[]           @relation("exceptions_resolved_byTousers")
+  reconciliations                          reconciliations[]
+  user_roles                               user_roles[]
+  organizations                            organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_users_organization")
+  store_id                                 String?                @db.Uuid
+  stores                                   stores?                @relation(fields: [store_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_users_store")
+
+  @@unique([organization_id, user_code], map: "uq_users_org_code")
+  @@unique([organization_id, email], map: "uq_users_org_email")
+  @@index([organization_id], map: "idx_users_organization")
+}
+
+model zones {
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String                      @db.Uuid
+  store_id                  String                      @db.Uuid
+  zone_code                 String                      @db.VarChar(50)
+  name                      String                      @db.VarChar(255)
+  zone_type                 String                      @db.VarChar(50)
+  polygon                   Json?
+  threshold_config          Json?
+  status                    String                      @default("ACTIVE") @db.VarChar(30)
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  ai_events                 ai_events[]
+  business_rules            business_rules[]
+  cameras                   cameras[]
+  customer_sessions         customer_sessions[]
+  employee_zone_assignments employee_zone_assignments[]
+  organizations             organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_zones_organization")
+  stores                    stores                      @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_zones_store")
+
+  @@unique([store_id, zone_code], map: "uq_zone_code_per_store")
+  @@index([store_id], map: "idx_zones_store")
+}
