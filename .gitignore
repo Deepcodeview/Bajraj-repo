@@ -1,0 +1,142 @@
+# ==========================================
+# Node.js / JavaScript (Frontend/Backend)
+# ==========================================
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Build and distribution directories
+dist/
+build/
+.next/
+.nuxt/
+out/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Diagnostic reports (Next.js / Node.js)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# ==========================================
+# Python (Backend/Scripts/Data Science)
+# ==========================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+pyvenv.cfg
+.env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# pytest / testing / coverage cache
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# ==========================================
+# Environment Variables & Secrets (CRITICAL)
+# ==========================================
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+*.pem
+*.key
+*.secret
+
+# ==========================================
+# Operating System & Editors
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Ehthumbs.db
+Desktop.ini
+
+# Editors (VS Code, WebStorm, PyCharm)
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+
+# Retail AI System runtime files
+backend/outputs/
+backend/temp/
+backend/retail_ai.db
+backend/retail_ai.db-shm
+backend/retail_ai.db-wal
+
+# Large model files (>50MB excluded)
+backend/yolov8m.pt
+backend/yolov8m.onnx
+backend/Face_Detection.zip
+backend/app.zip
+
+# Dataset (large)
+backend/dataset_collection/
+backend/Face_Detection/data/
+backend/Face_Detection/data_enhanced/
+
+# Screenshots
+*.png
+
