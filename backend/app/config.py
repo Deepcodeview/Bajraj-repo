@@ -20,6 +20,10 @@ SHELF_EMPTY_MODEL_PATH  = os.path.join(BASE_DIR, "Models", "empty_best.pt")
 OUT_OF_STOCK_MODEL_PATH = os.path.join(BASE_DIR, "Models", "out_of_stock.pt")
 PHONE_MODEL_PATH        = os.path.join(BASE_DIR, "Models", "phone_best.pt")
 
+# ── Inference device ────────────────────────
+import torch as _torch
+DEVICE = "cuda" if _torch.cuda.is_available() else "cpu"
+
 # ── Detection thresholds ─────────────────────
 PERSON_CONF     = 0.55
 SHELF_CONF      = 0.25

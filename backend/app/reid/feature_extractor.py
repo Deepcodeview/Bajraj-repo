@@ -22,7 +22,7 @@ def _load_model():
     backbone.classifier = torch.nn.Identity()
     backbone.eval()
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     _model = backbone.to(device)
     _model._device = device
 

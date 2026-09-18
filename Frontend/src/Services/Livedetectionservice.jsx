@@ -6,14 +6,14 @@ export const AI_BASE = import.meta.env.VITE_AI_BASE || 'http://localhost:8001';
 const RTSP_BASE = 'rtsp://frameai:qweRty99@45.121.29.181:30100/Streaming/channels';
 
 export const CAMERAS = [
-  { id: 'cam1', name: 'CAM-01', label: 'Entrance',   channel: 102, rtsp: `${RTSP_BASE}/102` },
-  { id: 'cam2', name: 'CAM-02', label: 'Main Floor', channel: 202, rtsp: `${RTSP_BASE}/202` },
-  { id: 'cam3', name: 'CAM-03', label: 'Aisle A',    channel: 302, rtsp: `${RTSP_BASE}/302` },
-  { id: 'cam4', name: 'CAM-04', label: 'Aisle B',    channel: 402, rtsp: `${RTSP_BASE}/402` },
-  { id: 'cam5', name: 'CAM-05', label: 'Billing',    channel: 502, rtsp: `${RTSP_BASE}/502` },
-  { id: 'cam6', name: 'CAM-06', label: 'Exit',       channel: 602, rtsp: `${RTSP_BASE}/602` },
-  { id: 'cam7', name: 'CAM-07', label: 'Storage',    channel: 702, rtsp: `${RTSP_BASE}/702` },
-  { id: 'cam8', name: 'CAM-08', label: 'Parking',    channel: 802, rtsp: `${RTSP_BASE}/802` },
+  { id: 'cam1', name: 'CAM-01', label: 'Entrance / Main Gate',  channel: 101, rtsp: `${RTSP_BASE}/101` },
+  { id: 'cam2', name: 'CAM-02', label: 'Section A / Aisle',     channel: 201, rtsp: `${RTSP_BASE}/201` },
+  { id: 'cam3', name: 'CAM-03', label: 'Section B / Shelves',   channel: 301, rtsp: `${RTSP_BASE}/301` },
+  { id: 'cam4', name: 'CAM-04', label: 'Checkout / Exit',       channel: 401, rtsp: `${RTSP_BASE}/401` },
+  { id: 'cam5', name: 'CAM-05', label: 'Storage / Back Area',   channel: 501, rtsp: `${RTSP_BASE}/501` },
+  { id: 'cam6', name: 'CAM-06', label: 'Cash Counter',          channel: 601, rtsp: `${RTSP_BASE}/601` },
+  { id: 'cam7', name: 'CAM-07', label: 'Parking / Exterior',    channel: 701, rtsp: `${RTSP_BASE}/701` },
+  { id: 'cam8', name: 'CAM-08', label: 'Loading Dock',          channel: 801, rtsp: `${RTSP_BASE}/801` },
 ];
 
 // Start RTSP job → returns job_id
@@ -69,21 +69,29 @@ export const acknowledgeAlert = async (alertId) => {
 
 // ── Python AI Server ──────────────────────────────────────────────
 export const fetchAIHealth = async () => {
-  const res = await fetch(`${AI_BASE}/health`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/health`);
+    return res.ok ? res.json() : { status: 'error' };
+  } catch { return { status: 'error' }; }
 };
 
 export const fetchAIEvents = async () => {
-  const res = await fetch(`${AI_BASE}/events`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/camera/session/events`);
+    return res.ok ? res.json() : { events: [] };
+  } catch { return { events: [] }; }
 };
 
 export const fetchAIAnalytics = async () => {
-  const res = await fetch(`${AI_BASE}/analytics`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/analytics`);
+    return res.ok ? res.json() : null;
+  } catch { return null; }
 };
 
 export const fetchPersons = async () => {
-  const res = await fetch(`${AI_BASE}/persons`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/persons`);
+    return res.ok ? res.json() : { cameras: {} };
+  } catch { return { cameras: {} }; }
 };

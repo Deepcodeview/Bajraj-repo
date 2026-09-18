@@ -119,15 +119,15 @@ const LiveDetection = () => {
       jids.forEach(([camId, jobId]) => {
         fetchJobResult(jobId)
           .then(d => {
+            if (!d) return; // null = 404, job gone — keep as-is, don't remove
             if (d?.analytics) setCamMetrics(p => ({ ...p, [camId]: d.analytics }));
-            else {
+            // only remove if explicitly failed
+            if (d?.status === 'failed') {
               setJobMap(p => { const n = { ...p }; delete n[camId]; return n; });
               setCamMetrics(p => { const n = { ...p }; delete n[camId]; return n; });
             }
           })
-          .catch(() => {
-            setJobMap(p => { const n = { ...p }; delete n[camId]; return n; });
-          });
+          .catch(() => {}); // ignore network errors, keep camera live
       });
     }, 4000);
     return () => clearInterval(t);
@@ -182,18 +182,19 @@ const LiveDetection = () => {
 
   const loadAI = useCallback(async () => {
     try {
-      const [health, evts, anl, prs] = await Promise.all([
-        fetchAIHealth(), fetchAIEvents(), fetchAIAnalytics(), fetchPersons(),
-      ]);
+      const health = await fetchAIHealth();
       setAiOnline(health?.status === 'ok');
+      const [evts, anl, prs] = await Promise.all([
+        fetchAIEvents(), fetchAIAnalytics(), fetchPersons(),
+      ]);
       setAnalytics(anl);
-      setPersons(prs.persons || []);
-      setAiEvents(evts.events || []);
+      setPersons(prs?.cameras ? Object.values(prs.cameras).flatMap(c => c.persons || []) : []);
+      setAiEvents(evts?.events || []);
       const now = Date.now();
       const buckets = Array.from({ length: 8 }, (_, i) => ({
         t: `${new Date(now - (7 - i) * 3600000).getHours()}:00`, v: 0,
       }));
-      (evts.events || []).forEach(ev => {
+      (evts?.events || []).forEach(ev => {
         const idx = Math.min(7, Math.floor((now - new Date(ev.timestamp).getTime()) / 3600000));
         buckets[7 - idx].v++;
       });
