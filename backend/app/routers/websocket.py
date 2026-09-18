@@ -94,6 +94,38 @@ def ws_status():
     return {"connected_clients": len(manager.active)}
 
 
+# ── WebSocket Camera Stream ──────────────────────────────────────────────────
+
+@router.websocket("/stream/{job_id}")
+async def ws_camera_stream(websocket: WebSocket, job_id: str):
+    """Stream JPEG frames over WebSocket as binary messages."""
+    from app.utils.streamer import frame_streamer
+    import queue as _queue
+
+    await websocket.accept()
+    q = frame_streamer.register(job_id)
+    try:
+        while True:
+            try:
+                frame_bytes = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(None, lambda: q.get(timeout=3.0)),
+                    timeout=4.0
+                )
+                await websocket.send_bytes(frame_bytes)
+            except (asyncio.TimeoutError, _queue.Empty):
+                # Send ping to keep connection alive
+                try:
+                    await websocket.send_text('{"type":"ping"}')
+                except Exception:
+                    break
+            except Exception:
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        frame_streamer.unregister(job_id, q)
+
+
 # ── Helper: push alert from sync code (used in analytics_service) ─────────────
 
 def push_alert_sync(severity: str, message: str, zone: str = None, job_id: str = None):
