@@ -2,30 +2,51 @@ import axiosInstance from './axios';
 
 export const AI_BASE = import.meta.env.VITE_AI_BASE || 'http://localhost:8001';
 
-// ── 6 Real IP Cameras (Hikvision RTSP) ───────────────────────────
+// ── Hikvision RTSP Cameras ───────────────────────────────────────
+// ch1 = x01 (High Quality), ch2 = x02 (Low Quality/Substream)
 const RTSP_BASE = 'rtsp://frameai:qweRty99@45.121.29.181:30100/Streaming/channels';
 
 export const CAMERAS = [
-  { id: 'cam1', name: 'CAM-01', label: 'Entrance',   channel: 102, rtsp: `${RTSP_BASE}/102` },
-  { id: 'cam2', name: 'CAM-02', label: 'Main Floor', channel: 202, rtsp: `${RTSP_BASE}/202` },
-  { id: 'cam3', name: 'CAM-03', label: 'Aisle A',    channel: 302, rtsp: `${RTSP_BASE}/302` },
-  { id: 'cam4', name: 'CAM-04', label: 'Aisle B',    channel: 402, rtsp: `${RTSP_BASE}/402` },
-  { id: 'cam5', name: 'CAM-05', label: 'Billing',    channel: 502, rtsp: `${RTSP_BASE}/502` },
-  { id: 'cam6', name: 'CAM-06', label: 'Exit',       channel: 602, rtsp: `${RTSP_BASE}/602` },
-  { id: 'cam7', name: 'CAM-07', label: 'Storage',    channel: 702, rtsp: `${RTSP_BASE}/702` },
-  { id: 'cam8', name: 'CAM-08', label: 'Parking',    channel: 802, rtsp: `${RTSP_BASE}/802` },
+  { id: 'cam1', name: 'CAM-01', label: 'Entrance',   ch1: `${RTSP_BASE}/101`, ch2: `${RTSP_BASE}/102` },
+  { id: 'cam2', name: 'CAM-02', label: 'Main Floor', ch1: `${RTSP_BASE}/201`, ch2: `${RTSP_BASE}/202` },
+  { id: 'cam3', name: 'CAM-03', label: 'Aisle A',    ch1: `${RTSP_BASE}/301`, ch2: `${RTSP_BASE}/302` },
+  { id: 'cam4', name: 'CAM-04', label: 'Aisle B',    ch1: `${RTSP_BASE}/401`, ch2: `${RTSP_BASE}/402` },
+  { id: 'cam5', name: 'CAM-05', label: 'Billing',    ch1: `${RTSP_BASE}/501`, ch2: `${RTSP_BASE}/502` },
+  { id: 'cam6', name: 'CAM-06', label: 'Exit',       ch1: `${RTSP_BASE}/601`, ch2: `${RTSP_BASE}/602` },
+  { id: 'cam7', name: 'CAM-07', label: 'Storage',    ch1: `${RTSP_BASE}/701`, ch2: `${RTSP_BASE}/702` },
+  { id: 'cam8', name: 'CAM-08', label: 'Parking',    ch1: `${RTSP_BASE}/801`, ch2: `${RTSP_BASE}/802` },
 ];
 
+export const getRtspUrl = (cam, quality) => quality === 'low' ? cam.ch2 : cam.ch1;
+
 // Start RTSP job → returns job_id
-export const startCameraJob = async (cam) => {
+export const startCameraJob = async (cam, quality = 'high') => {
+  const rtsp_url = getRtspUrl(cam, quality);
   try {
     const res = await fetch(`${AI_BASE}/camera/rtsp/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rtsp_url: cam.rtsp, camera_id: cam.id, camera_name: cam.name }),
+      body: JSON.stringify({
+        rtsp_url,
+        camera_id: cam.id,
+        camera_name: cam.name,
+        dataset_rtsp_url: cam.ch1,
+        zones: '[]',
+        entry_zone: '[]',
+        exit_zone: '[]',
+        conf: 0.35,
+        mode: 'indoor',
+      }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
     return res.json();
-  } catch (e) { throw new Error('AI server unreachable. Check Nginx /ai/ proxy config.'); }
+  } catch (e) {
+    if (e.message && !e.message.includes('fetch')) throw e;
+    throw new Error('AI server unreachable. Make sure Python backend is running on port 8001.');
+  }
 };
 
 export const stopCameraJob = async (jobId) => {
@@ -41,8 +62,11 @@ export const getJobStreamUrl = (jobId) => `${AI_BASE}/jobs/${jobId}/stream`;
 export const fetchJobResult = async (jobId) => {
   try {
     const res = await fetch(`${AI_BASE}/result/${jobId}`);
-    if (res.status === 404) return null;
-    return res.ok ? res.json() : null;
+    if (res.status === 404) return { stale: true }; // job gone after restart
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status === 'FAILED') return null;
+    return data;
   } catch { return null; }
 };
 
@@ -69,21 +93,37 @@ export const acknowledgeAlert = async (alertId) => {
 
 // ── Python AI Server ──────────────────────────────────────────────
 export const fetchAIHealth = async () => {
-  const res = await fetch(`${AI_BASE}/health`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/`);
+    if (!res.ok) return { status: 'offline' };
+    const data = await res.json();
+    return { status: data.status === 'ok' ? 'ok' : 'ok' }; // root returns {status:"ok"}
+  } catch { return { status: 'offline' }; }
 };
 
 export const fetchAIEvents = async () => {
-  const res = await fetch(`${AI_BASE}/events`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/camera/session/events`);
+    if (!res.ok) return { events: [] };
+    return res.json();
+  } catch { return { events: [] }; }
 };
 
 export const fetchAIAnalytics = async () => {
-  const res = await fetch(`${AI_BASE}/analytics`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/camera/retail/dashboard`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch { return null; }
 };
 
 export const fetchPersons = async () => {
-  const res = await fetch(`${AI_BASE}/persons`);
-  return res.json();
+  try {
+    const res = await fetch(`${AI_BASE}/camera/tracking/active`);
+    if (!res.ok) return { persons: [] };
+    const data = await res.json();
+    // flatten cameras → persons array
+    const persons = Object.values(data.cameras || {}).flatMap(c => c.persons || []);
+    return { persons };
+  } catch { return { persons: [] }; }
 };

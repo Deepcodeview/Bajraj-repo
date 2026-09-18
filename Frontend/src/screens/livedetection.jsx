@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { RefreshCw, Wifi, WifiOff, CheckCircle } from 'lucide-react';
@@ -7,7 +7,7 @@ import {
   fetchStores, fetchZones, fetchAlerts, acknowledgeAlert,
   fetchAIHealth, fetchAIEvents, fetchAIAnalytics, fetchPersons,
   CAMERAS, startCameraJob, stopCameraJob, stopAllJobs,
-  getJobStreamUrl, fetchJobResult,
+  getJobStreamUrl, fetchJobResult, getRtspUrl,
 } from '../Services/Livedetectionservice';
 import '../Style/Livedetection.css';
 
@@ -107,41 +107,49 @@ const LiveDetection = () => {
   const [camMetrics, setCamMetrics] = useState({});
   const [starting, setStarting]     = useState({});
   const [startingAll, setStartingAll] = useState(false);
+  const [quality, setQuality] = useState('high'); // 'high' = ch1, 'low' = ch2
 
   useEffect(() => {
     localStorage.setItem('ldJobMap', JSON.stringify(jobMap));
   }, [jobMap]);
 
+  const jobMapRef = React.useRef(jobMap);
+  useEffect(() => { jobMapRef.current = jobMap; }, [jobMap]);
+
   useEffect(() => {
-    const jids = Object.entries(jobMap);
-    if (!jids.length) return;
     const t = setInterval(() => {
+      const jids = Object.entries(jobMapRef.current);
+      if (!jids.length) return;
       jids.forEach(([camId, jobId]) => {
         fetchJobResult(jobId)
           .then(d => {
-            if (d?.analytics) setCamMetrics(p => ({ ...p, [camId]: d.analytics }));
-            else {
+            if (!d) return; // network error, keep alive
+            if (d.stale || d.status === 'FAILED') {
+              // job no longer exists on backend, clean up
               setJobMap(p => { const n = { ...p }; delete n[camId]; return n; });
               setCamMetrics(p => { const n = { ...p }; delete n[camId]; return n; });
+              return;
             }
+            if (d.analytics) setCamMetrics(p => ({ ...p, [camId]: d.analytics }));
           })
-          .catch(() => {
-            setJobMap(p => { const n = { ...p }; delete n[camId]; return n; });
-          });
+          .catch(() => {}); // never remove on network error
       });
     }, 4000);
     return () => clearInterval(t);
-  }, [jobMap]);
+  }, []); // run once, uses ref for latest jobMap
 
   const handleStart = useCallback(async (cam) => {
     setStarting(p => ({ ...p, [cam.id]: true }));
     try {
-      const d = await startCameraJob(cam);
-      if (d?.job_id) setJobMap(p => ({ ...p, [cam.id]: d.job_id }));
-      else alert(d?.detail || 'Failed to start camera. Check AI server.');
+      const d = await startCameraJob(cam, quality);
+      if (d?.job_id) {
+        setJobMap(p => ({ ...p, [cam.id]: d.job_id }));
+      } else {
+        alert(d?.detail || d?.message || 'Failed to start camera. Check AI server.');
+      }
     } catch (e) { alert(e.message); }
     setStarting(p => ({ ...p, [cam.id]: false }));
-  }, []);
+  }, [quality]);
 
   const handleStop = useCallback(async (cam) => {
     const jobId = jobMap[cam.id];
@@ -188,14 +196,15 @@ const LiveDetection = () => {
       setAiOnline(health?.status === 'ok');
       setAnalytics(anl);
       setPersons(prs.persons || []);
-      setAiEvents(evts.events || []);
+      const events = evts.events || [];
+      setAiEvents(events);
       const now = Date.now();
       const buckets = Array.from({ length: 8 }, (_, i) => ({
         t: `${new Date(now - (7 - i) * 3600000).getHours()}:00`, v: 0,
       }));
-      (evts.events || []).forEach(ev => {
+      events.forEach(ev => {
         const idx = Math.min(7, Math.floor((now - new Date(ev.timestamp).getTime()) / 3600000));
-        buckets[7 - idx].v++;
+        if (idx >= 0) buckets[7 - idx].v++;
       });
       setTrendData(buckets);
     } catch { setAiOnline(false); }
@@ -240,6 +249,22 @@ const LiveDetection = () => {
               AI {aiOnline ? 'Online' : 'Offline'}
             </span>
             <span className="ld-enrolled-badge">{activeCams}/{CAMERAS.length} live</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#1e293b', borderRadius: 6, padding: '2px 4px' }}>
+              <button
+                onClick={() => setQuality('high')}
+                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                  background: quality === 'high' ? '#0057ff' : 'transparent',
+                  color: quality === 'high' ? '#fff' : '#94a3b8', fontWeight: 600 }}>
+                HD
+              </button>
+              <button
+                onClick={() => setQuality('low')}
+                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                  background: quality === 'low' ? '#f59e0b' : 'transparent',
+                  color: quality === 'low' ? '#fff' : '#94a3b8', fontWeight: 600 }}>
+                SD
+              </button>
+            </div>
             {activeCams < CAMERAS.length ? (
               <button className="ld-expand-btn" disabled={startingAll} onClick={handleStartAll}
                 style={{ background: '#0057ff', color: '#fff', border: 'none', opacity: startingAll ? 0.7 : 1 }}>
