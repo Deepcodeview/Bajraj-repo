@@ -2,7 +2,6 @@ import axiosInstance from './axios';
 
 export const AI_BASE = import.meta.env.VITE_AI_BASE || 'http://localhost:8001';
 
-// ── Hikvision RTSP Cameras ───────────────────────────────────────
 // ch1 = x01 (High Quality), ch2 = x02 (Low Quality/Substream)
 const RTSP_BASE = 'rtsp://frameai:qweRty99@45.121.29.181:30100/Streaming/channels';
 
@@ -62,10 +61,10 @@ export const getJobStreamUrl = (jobId) => `${AI_BASE}/jobs/${jobId}/stream`;
 export const fetchJobResult = async (jobId) => {
   try {
     const res = await fetch(`${AI_BASE}/result/${jobId}`);
-    if (res.status === 404) return { stale: true }; // job gone after restart
+    if (res.status === 404) return { stale: true };
     if (!res.ok) return null;
     const data = await res.json();
-    if (data.status === 'FAILED') return null;
+    if (data.status === 'FAILED') return { stale: true };
     return data;
   } catch { return null; }
 };
@@ -97,7 +96,7 @@ export const fetchAIHealth = async () => {
     const res = await fetch(`${AI_BASE}/`);
     if (!res.ok) return { status: 'offline' };
     const data = await res.json();
-    return { status: data.status === 'ok' ? 'ok' : 'ok' }; // root returns {status:"ok"}
+    return { status: data.status === 'ok' ? 'ok' : 'offline' };
   } catch { return { status: 'offline' }; }
 };
 
@@ -122,7 +121,6 @@ export const fetchPersons = async () => {
     const res = await fetch(`${AI_BASE}/camera/tracking/active`);
     if (!res.ok) return { persons: [] };
     const data = await res.json();
-    // flatten cameras → persons array
     const persons = Object.values(data.cameras || {}).flatMap(c => c.persons || []);
     return { persons };
   } catch { return { persons: [] }; }

@@ -17,7 +17,7 @@ from app.config import (
     SHELF_MODEL_PATH, SHELF_EMPTY_MODEL_PATH, OUT_OF_STOCK_MODEL_PATH, PHONE_MODEL_PATH,
     STREAM_JPEG_QUALITY, STREAM_RESIZE_WIDTH,
     CROWD_THRESH, QUEUE_ZONE_THRESH, LOITERING_THRESH_SEC, LOITERING_EXEMPT_CAMERAS,
-    SHOW_CONFIDENCE, HEATMAP_ALPHA,
+    SHOW_CONFIDENCE, HEATMAP_ALPHA, DEVICE,
 )
 from app.models.tracker import Tracker
 from app.models.shelf import ShelfDetector, draw_shelf_legend, draw_shelf_overlay
@@ -292,7 +292,7 @@ def process_video(
                 VEHICLE_LABELS  = {2: "Car", 3: "Moto", 5: "Bus", 7: "Truck"}
                 out_results = vehicle_model(
                     frame, conf=conf, classes=VEHICLE_CLASSES,
-                    verbose=False, device="mps", iou=0.35
+                    verbose=False, device=DEVICE, iou=0.35
                 )[0]
                 out_count = len(out_results.boxes)
                 annotated = frame.copy()
@@ -322,7 +322,7 @@ def process_video(
                 VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck
                 v_results  = vehicle_model(
                     frame, conf=conf, classes=VEHICLE_CLASSES,
-                    verbose=False, device="mps"
+                    verbose=False, device=DEVICE
                 )[0]
                 v_count = len(v_results.boxes)
                 # Draw boxes
@@ -396,7 +396,7 @@ def process_video(
                                 # Run YOLO to get person bboxes for labels
                                 out_results  = person_model(
                                     frame, conf=conf, classes=[PERSON_CLASS_ID],
-                                    verbose=False, device="mps"
+                                    verbose=False, device=DEVICE
                                 )[0]
                                 out_tracked  = sv.Detections.from_ultralytics(out_results)
                                 sf    = cv2.resize(frame, (1280, 720))
@@ -438,7 +438,7 @@ def process_video(
             detect_conf = 0.55 if camera_id in ("cam2", "cam3", "cam6", "cam7", "cam8") else conf
             results     = person_model(
                 frame, conf=detect_conf, classes=[PERSON_CLASS_ID],
-                verbose=False, device="mps", iou=0.35
+                verbose=False, device=DEVICE, iou=0.35
             )[0]
             detections = sv.Detections.from_ultralytics(results)
 
@@ -540,7 +540,7 @@ def process_video(
             phone_count = 0
             if phone_model is not None:
                 try:
-                    ph_res   = phone_model(annotated, conf=0.4, verbose=False, device="mps")[0]
+                    ph_res   = phone_model(annotated, conf=0.4, verbose=False, device=DEVICE)[0]
                     cam_gids = global_registry.get_active_on_camera(camera_id)
                     # All tracked persons (not just identified employees)
                     emp_boxes = {}

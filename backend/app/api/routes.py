@@ -45,6 +45,64 @@ def home():
     return {"message": "Retail AI Backend Running 🚀", "status": "ok"}
 
 
+@router.get("/health")
+def health():
+    return {"status": "ok", "message": "Retail AI Backend is running"}
+
+
+@router.get("/events")
+async def events():
+    """Alias → /dashboard/stream (SSE live KPIs)"""
+    from app.routers.dashboard import _get_live_kpis
+    import asyncio, json
+    from fastapi.responses import StreamingResponse
+
+    async def generator():
+        while True:
+            try:
+                data = _get_live_kpis()
+                yield f"data: {json.dumps(data)}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            await asyncio.sleep(5)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get("/analytics")
+def analytics():
+    """Alias → /dashboard/kpis"""
+    from app.routers.dashboard import _get_live_kpis
+    return _get_live_kpis()
+
+
+@router.get("/persons")
+def persons():
+    """Alias → /camera/tracking/active"""
+    from app.reid.global_registry import global_registry
+    from app.routers.camera import ALL_CAMERAS
+    result = {}
+    for cam in ALL_CAMERAS:
+        cam_active = global_registry.get_active_on_camera(cam["id"])
+        if cam_active:
+            result[cam["id"]] = {
+                "camera_name": cam["label"],
+                "persons": list(cam_active.values()),
+            }
+    return {
+        "total_unique_ever": global_registry.total_unique,
+        "cameras": result,
+    }
+
+
 # ── Upload & process ──────────────────────────────────────────────────────────
 @router.post("/upload-video/", response_model=UploadResponse)
 async def upload_video(
