@@ -200,6 +200,7 @@ def process_video(
             drained += 1
             if ret and _f is not None:
                 import numpy as _np
+                _stream(job_id, _f)  # stream immediately during drain
                 if _f.mean() > 5.0 and _np.std(_f) > 5.0:
                     log.info(f"[{job_id}] Valid keyframe found after {drained} drain frames.")
                     break
@@ -275,6 +276,10 @@ def process_video(
                 break  # EOF signal from reader thread
 
             frame_count += 1
+
+            # Stream raw frame immediately so browser sees video even before AI processes
+            if frame_count % 3 == 0:
+                _stream(job_id, frame)
 
             if frame_count % ANNOTATION_SKIP_FRAMES != 0:
                 continue

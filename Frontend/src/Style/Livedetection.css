@@ -151,3 +151,7 @@
 
 /* Empty / loading */
 .ld-empty { padding:16px;text-align:center;font-size:13px;color:#9ca3af;display:flex;align-items:center;justify-content:center;gap:6px; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

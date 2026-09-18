@@ -18,9 +18,12 @@ export const CAMERAS = [
 
 export const getRtspUrl = (cam, quality) => quality === 'low' ? cam.ch2 : cam.ch1;
 
+// Force substream (ch2/SD) for all jobs — ch1 HD causes H.265 decode failures
+const _getJobRtsp = (cam) => cam.ch2;
+
 // Start RTSP job → returns job_id
 export const startCameraJob = async (cam, quality = 'high') => {
-  const rtsp_url = getRtspUrl(cam, quality);
+  const rtsp_url = cam.ch2; // Always use SD substream (H.264) — ch1 HD is H.265 which OpenCV fails to decode
   try {
     const res = await fetch(`${AI_BASE}/camera/rtsp/start`, {
       method: 'POST',
@@ -57,6 +60,7 @@ export const stopAllJobs = async () => {
 };
 
 export const getJobStreamUrl = (jobId) => `${AI_BASE}/jobs/${jobId}/stream`;
+export const getJobWsUrl = (jobId) => `${AI_BASE.replace('http', 'ws')}/ws/stream/${jobId}`;
 
 export const fetchJobResult = async (jobId) => {
   try {
