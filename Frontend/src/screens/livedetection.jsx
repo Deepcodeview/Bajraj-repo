@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { RefreshCw, Wifi, WifiOff, CheckCircle } from 'lucide-react';
@@ -7,7 +7,7 @@ import {
   fetchStores, fetchZones, fetchAlerts, acknowledgeAlert,
   fetchAIHealth, fetchAIEvents, fetchAIAnalytics, fetchPersons,
   CAMERAS, startCameraJob, stopCameraJob, stopAllJobs,
-  getJobStreamUrl, fetchJobResult,
+  getJobStreamUrl, fetchJobResult, getRtspUrl,
 } from '../Services/Livedetectionservice';
 import '../Style/Livedetection.css';
 
@@ -19,8 +19,6 @@ const timeAgo = (d) => {
   return `${Math.floor(s / 3600)}h ago`;
 };
 
-// ── Camera Tile ───────────────────────────────────────────────────
-// Overlays are position:absolute so MJPEG repaints don't cause reflow/flicker
 function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
   const isLive = !!jobId;
   const isStarting = !!starting;
@@ -31,7 +29,6 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
       className={`ld-cam-tile ${large ? 'ld-cam-tile-large' : ''}`}
       style={{ border: `2px solid ${isLive ? '#22c55e' : '#1e293b'}` }}
     >
-      {/* Stream fills the tile */}
       {isLive ? (
         <img
           src={getJobStreamUrl(jobId)}
@@ -46,7 +43,6 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
         </div>
       )}
 
-      {/* TOP overlay — absolutely positioned, no reflow on stream repaint */}
       <div className="ld-cam-tile-bar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className={`ld-dot ${isLive ? 'green' : 'red'}`} />
@@ -70,7 +66,6 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
         </div>
       </div>
 
-      {/* BOTTOM overlay — absolutely positioned */}
       <div className="ld-cam-ctrl-bar">
         <span style={{ fontSize: 10, color: '#94a3b8' }}>
           {isStarting ? 'Connecting…' : isLive ? '1920×1080 • AI ON' : 'Offline'}
@@ -88,7 +83,6 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
   );
 }
 
-// ── Main screen ───────────────────────────────────────────────────
 const LiveDetection = () => {
   const [stores, setStores]               = useState([]);
   const [selectedStore, setSelectedStore] = useState(null);
@@ -100,6 +94,7 @@ const LiveDetection = () => {
   const [aiEvents, setAiEvents]           = useState([]);
   const [trendData, setTrendData]         = useState([]);
   const [selectedCam, setSelectedCam]     = useState(0);
+  const [quality, setQuality]             = useState('high');
 
   const [jobMap, setJobMap] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ldJobMap') || '{}'); } catch { return {}; }
@@ -112,36 +107,44 @@ const LiveDetection = () => {
     localStorage.setItem('ldJobMap', JSON.stringify(jobMap));
   }, [jobMap]);
 
+  const jobMapRef = React.useRef(jobMap);
+  useEffect(() => { jobMapRef.current = jobMap; }, [jobMap]);
+
+  // Poll job results — runs once, always reads latest jobMap via ref
   useEffect(() => {
-    const jids = Object.entries(jobMap);
-    if (!jids.length) return;
     const t = setInterval(() => {
+      const jids = Object.entries(jobMapRef.current);
+      if (!jids.length) return;
       jids.forEach(([camId, jobId]) => {
         fetchJobResult(jobId)
           .then(d => {
-            if (!d) return; // null = 404, job gone — keep as-is, don't remove
-            if (d?.analytics) setCamMetrics(p => ({ ...p, [camId]: d.analytics }));
-            // only remove if explicitly failed
-            if (d?.status === 'failed') {
+            if (!d) return; // network error — keep alive
+            if (d.stale) {
+              // job gone from backend (404) — clean up
               setJobMap(p => { const n = { ...p }; delete n[camId]; return n; });
               setCamMetrics(p => { const n = { ...p }; delete n[camId]; return n; });
+              return;
             }
+            if (d.analytics) setCamMetrics(p => ({ ...p, [camId]: d.analytics }));
           })
-          .catch(() => {}); // ignore network errors, keep camera live
+          .catch(() => {}); // never remove on network error
       });
     }, 4000);
     return () => clearInterval(t);
-  }, [jobMap]);
+  }, []);
 
   const handleStart = useCallback(async (cam) => {
     setStarting(p => ({ ...p, [cam.id]: true }));
     try {
-      const d = await startCameraJob(cam);
-      if (d?.job_id) setJobMap(p => ({ ...p, [cam.id]: d.job_id }));
-      else alert(d?.detail || 'Failed to start camera. Check AI server.');
+      const d = await startCameraJob(cam, quality);
+      if (d?.job_id) {
+        setJobMap(p => ({ ...p, [cam.id]: d.job_id }));
+      } else {
+        alert(d?.detail || d?.message || 'Failed to start camera. Check AI server.');
+      }
     } catch (e) { alert(e.message); }
     setStarting(p => ({ ...p, [cam.id]: false }));
-  }, []);
+  }, [quality]);
 
   const handleStop = useCallback(async (cam) => {
     const jobId = jobMap[cam.id];
@@ -188,15 +191,16 @@ const LiveDetection = () => {
         fetchAIEvents(), fetchAIAnalytics(), fetchPersons(),
       ]);
       setAnalytics(anl);
-      setPersons(prs?.cameras ? Object.values(prs.cameras).flatMap(c => c.persons || []) : []);
-      setAiEvents(evts?.events || []);
+      setPersons(prs.persons || []);
+      const events = evts.events || [];
+      setAiEvents(events);
       const now = Date.now();
       const buckets = Array.from({ length: 8 }, (_, i) => ({
         t: `${new Date(now - (7 - i) * 3600000).getHours()}:00`, v: 0,
       }));
-      (evts?.events || []).forEach(ev => {
+      events.forEach(ev => {
         const idx = Math.min(7, Math.floor((now - new Date(ev.timestamp).getTime()) / 3600000));
-        buckets[7 - idx].v++;
+        if (idx >= 0) buckets[7 - idx].v++;
       });
       setTrendData(buckets);
     } catch { setAiOnline(false); }
@@ -241,6 +245,25 @@ const LiveDetection = () => {
               AI {aiOnline ? 'Online' : 'Offline'}
             </span>
             <span className="ld-enrolled-badge">{activeCams}/{CAMERAS.length} live</span>
+
+            {/* Quality Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#1e293b', borderRadius: 6, padding: '2px 4px' }}>
+              <button
+                onClick={() => setQuality('high')}
+                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                  background: quality === 'high' ? '#0057ff' : 'transparent',
+                  color: quality === 'high' ? '#fff' : '#94a3b8', fontWeight: 600 }}>
+                HD
+              </button>
+              <button
+                onClick={() => setQuality('low')}
+                style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                  background: quality === 'low' ? '#f59e0b' : 'transparent',
+                  color: quality === 'low' ? '#fff' : '#94a3b8', fontWeight: 600 }}>
+                SD
+              </button>
+            </div>
+
             {activeCams < CAMERAS.length ? (
               <button className="ld-expand-btn" disabled={startingAll} onClick={handleStartAll}
                 style={{ background: '#0057ff', color: '#fff', border: 'none', opacity: startingAll ? 0.7 : 1 }}>
