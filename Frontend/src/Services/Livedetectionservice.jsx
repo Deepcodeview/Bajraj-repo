@@ -1,6 +1,6 @@
 import axiosInstance from './axios';
 
-export const AI_BASE = import.meta.env.VITE_AI_BASE || 'http://localhost:8001';
+export const AI_BASE = import.meta.env.VITE_AI_BASE || 'https://dev.cvframeiq.com';
 
 // ch1 = x01 (High Quality), ch2 = x02 (Low Quality/Substream)
 const RTSP_BASE = 'rtsp://frameai:qweRty99@45.121.29.181:30100/Streaming/channels';
