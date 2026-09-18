@@ -7,7 +7,7 @@ import {
   fetchStores, fetchZones, fetchAlerts, acknowledgeAlert,
   fetchAIHealth, fetchAIEvents, fetchAIAnalytics, fetchPersons,
   CAMERAS, startCameraJob, stopCameraJob, stopAllJobs,
-  getJobStreamUrl, fetchJobResult, getRtspUrl,
+  getJobStreamUrl, getJobWsUrl, fetchJobResult, getRtspUrl,
 } from '../Services/Livedetectionservice';
 import '../Style/Livedetection.css';
 
@@ -23,6 +23,40 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
   const isLive = !!jobId;
   const isStarting = !!starting;
   const inside = metrics?.currently_inside ?? 0;
+  const canvasRef = React.useRef(null);
+  const wsRef = React.useRef(null);
+  const [wsStatus, setWsStatus] = React.useState('idle');
+
+  React.useEffect(() => {
+    if (!isLive) { setWsStatus('idle'); return; }
+
+    setWsStatus('connecting');
+    const ws = new WebSocket(getJobWsUrl(jobId));
+    wsRef.current = ws;
+    ws.binaryType = 'arraybuffer';
+
+    ws.onmessage = (evt) => {
+      if (typeof evt.data === 'string') return;
+      const blob = new Blob([evt.data], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) { URL.revokeObjectURL(url); return; }
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        setWsStatus('live');
+      };
+      img.src = url;
+    };
+
+    ws.onerror = () => setWsStatus('error');
+    ws.onclose = () => setWsStatus(s => s === 'live' ? 'idle' : s);
+
+    return () => { ws.close(); wsRef.current = null; };
+  }, [isLive, jobId]);
 
   return (
     <div
@@ -30,12 +64,28 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large }) {
       style={{ border: `2px solid ${isLive ? '#22c55e' : '#1e293b'}` }}
     >
       {isLive ? (
-        <img
-          src={getJobStreamUrl(jobId)}
-          alt={cam.name}
-          className="ld-cam-tile-img"
-          onError={e => { e.target.style.opacity = '0.1'; }}
-        />
+        <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }}>
+          {wsStatus !== 'live' && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 8, zIndex: 2,
+            }}>
+              <div style={{
+                width: 28, height: 28, border: '3px solid #22c55e',
+                borderTopColor: 'transparent', borderRadius: '50%',
+                animation: wsStatus === 'error' ? 'none' : 'spin 1s linear infinite',
+              }} />
+              <span style={{ fontSize: 10, color: wsStatus === 'error' ? '#ef4444' : '#22c55e' }}>
+                {wsStatus === 'error' ? 'Stream Error' : 'Connecting…'}
+              </span>
+            </div>
+          )}
+          <canvas
+            ref={canvasRef}
+            className="ld-cam-tile-img"
+            style={{ opacity: wsStatus === 'live' ? 1 : 0, transition: 'opacity 0.3s' }}
+          />
+        </div>
       ) : (
         <div className="ld-cam-tile-dead">
           <WifiOff size={18} color="#6b7280" />
@@ -222,7 +272,7 @@ const LiveDetection = () => {
     return () => clearInterval(id);
   }, [selectedStore]);
 
-  const activeCam  = CAMERAS[selectedCam];
+  const activeCam  = CAMERAS[selectedCam] || CAMERAS[0];
   const activeCams = Object.keys(jobMap).length;
   const zoneColors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
   const peakHour   = trendData.reduce((a, b) => b.v > a.v ? b : a, { t: '--', v: 0 });
@@ -490,7 +540,7 @@ const LiveDetection = () => {
                     <span className="ld-today-badge">{persons.length}</span>
                   </div>
                   <div className="ld-persons-grid">
-                    {persons.map(p => (
+                    {persons.filter(p => p && p.name).map(p => (
                       <div className="ld-person-chip" key={p.name}>
                         <span className="ld-person-avatar">{p.name[0].toUpperCase()}</span>
                         <div>
