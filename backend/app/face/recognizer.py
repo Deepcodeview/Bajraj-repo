@@ -28,8 +28,12 @@ class FaceRecognizer:
         return cls._instance
 
     def __init__(self):
+        import onnxruntime as ort
         from insightface.app import FaceAnalysis
-        self.app = FaceAnalysis(name=INSIGHTFACE_MODEL, providers=["CPUExecutionProvider"])
+        available = ort.get_available_providers()
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if "CUDAExecutionProvider" in available else ["CPUExecutionProvider"]
+        print(f"[Face] InsightFace using: {providers[0]}")
+        self.app = FaceAnalysis(name=INSIGHTFACE_MODEL, providers=providers)
         self.app.prepare(ctx_id=0, det_size=DET_SIZE)
 
         self.db_names      = []
