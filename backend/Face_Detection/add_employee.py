@@ -3,6 +3,7 @@ add_employee.py — Naya employee enroll karo
 Usage: python add_employee.py --name "Rahul" --cam cam6
        python add_employee.py --name "Rahul" --images /path/to/photos/
 
+       
 Steps:
 1. CCTV dataset se crops nikalta hai (agar --cam diya)
 2. Blur filter + CLAHE enhancement
