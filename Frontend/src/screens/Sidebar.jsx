@@ -11,7 +11,8 @@ import {
   MoreVertical,
   Video,
   Bot,
-  Sparkles
+  Sparkles,
+  LogOut
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import '../Style/Sidebar.css';
@@ -118,6 +119,16 @@ const Sidebar = () => {
           </div>
           <MoreVertical size={16} className="more-icon" />
         </div>
+        <button
+          className="logout-btn"
+          onClick={() => {
+            localStorage.removeItem('token');
+            navigate('/login');
+          }}
+        >
+          <LogOut size={16} />
+          <span>Logout</span>
+        </button>
       </div>
     </aside>
   );

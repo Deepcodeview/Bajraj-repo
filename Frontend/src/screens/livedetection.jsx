@@ -43,6 +43,9 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
   const frameRef   = React.useRef(null);
   const rafRef     = React.useRef(null);
   const canvasSize = React.useRef({ w: 854, h: 480 });
+  const zonesRef   = React.useRef([]);
+  const ptsRef     = React.useRef([]);
+  const dirtyRef   = React.useRef(true);
 
   const [wsStatus,   setWsStatus]   = React.useState('idle');
   const [zoneMode,   setZoneMode]   = React.useState(false);
@@ -52,6 +55,10 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
   const [zoneName,   setZoneName]   = React.useState('');
   const [zoneType,   setZoneType]   = React.useState('Entrance');
   const [saving,     setSaving]     = React.useState(false);
+
+  // Sync refs so draw loop always has latest data without re-mounting
+  React.useEffect(() => { zonesRef.current = zones; dirtyRef.current = true; }, [zones]);
+  React.useEffect(() => { ptsRef.current = currentPts; dirtyRef.current = true; }, [currentPts]);
 
   // Load zones when zone mode opens
   React.useEffect(() => {
@@ -75,6 +82,7 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
           const bmp = await createImageBitmap(new Blob([evt.data], { type: 'image/jpeg' }));
           frameRef.current = bmp;
           canvasSize.current = { w: bmp.width, h: bmp.height };
+          dirtyRef.current = true;
           setWsStatus('live');
         } catch {}
       };
@@ -88,11 +96,21 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
     };
   }, [isLive, jobId]);
 
-  // Draw loop — runs always when canvas is mounted
+  // Draw loop — mounts once, reads latest data via refs
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    let lastFrame = null;
     const draw = () => {
+      const hasNewFrame = frameRef.current !== lastFrame;
+      const isDirty = dirtyRef.current;
+      if (!hasNewFrame && !isDirty) {
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      lastFrame = frameRef.current;
+      dirtyRef.current = false;
+
       const { w, h } = canvasSize.current;
       if (canvas.width !== w) canvas.width = w;
       if (canvas.height !== h) canvas.height = h;
@@ -103,8 +121,7 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
         ctx.fillStyle = '#0f172a';
         ctx.fillRect(0, 0, w, h);
       }
-      // Draw saved zones
-      zones.forEach((z, zi) => {
+      zonesRef.current.forEach((z, zi) => {
         const pts = z.polygon?.points;
         if (!pts || pts.length < 2) return;
         const color = ZONE_COLORS[zi % ZONE_COLORS.length];
@@ -123,17 +140,17 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
         ctx.textAlign = 'center';
         ctx.fillText(z.name, cx, cy);
       });
-      // Draw in-progress polygon
-      if (currentPts.length > 0) {
+      const pts = ptsRef.current;
+      if (pts.length > 0) {
         ctx.beginPath();
-        ctx.moveTo(currentPts[0][0], currentPts[0][1]);
-        currentPts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
         ctx.strokeStyle = '#f59e0b';
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 3]);
         ctx.stroke();
         ctx.setLineDash([]);
-        currentPts.forEach(p => {
+        pts.forEach(p => {
           ctx.beginPath();
           ctx.arc(p[0], p[1], 5, 0, Math.PI * 2);
           ctx.fillStyle = '#f59e0b';
@@ -144,7 +161,7 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
     };
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [zones, currentPts]);
+  }, []);
 
   const handleCanvasClick = useCallback((e) => {
     if (!drawing) return;
@@ -185,7 +202,7 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
       style={{ border: `2px solid ${zoneMode ? '#f59e0b' : isLive ? '#22c55e' : '#1e293b'}` }}
     >
       {isLive ? (
-        <div style={{ position: 'relative', width: '100%', background: '#000' }}>
+        <div style={{ position: 'relative', width: '100%', background: '#000', minHeight: 200 }}>
           {wsStatus !== 'live' && !zoneMode && (
             <div style={{
               position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
@@ -206,7 +223,7 @@ function CamTile({ cam, jobId, metrics, starting, onStart, onStop, large, storeI
             onClick={handleCanvasClick}
             className="ld-cam-tile-img"
             style={{
-              opacity: wsStatus === 'live' ? 1 : zoneMode ? 0.6 : 0,
+              opacity: wsStatus === 'live' || zoneMode ? 1 : 0,
               transition: 'opacity 0.3s',
               cursor: drawing ? 'crosshair' : 'default',
               display: 'block', width: '100%', height: 'auto',

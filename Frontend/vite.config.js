@@ -11,7 +11,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://dev.cvframeiq.com',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       }
     }

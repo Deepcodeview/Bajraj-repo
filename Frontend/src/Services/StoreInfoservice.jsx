@@ -14,8 +14,8 @@ export const updateOrganization = (id, data) =>
   axiosInstance.patch(`/organizations/${id}`, data).then(r => r.data);
 
 // Stores
-export const getStores = (organizationId) =>
-  axiosInstance.get('/stores', { params: { organizationId } }).then(r => r.data);
+export const getStores = () =>
+  axiosInstance.get('/stores').then(r => r.data);
 
 export const getStoreById = (id) =>
   axiosInstance.get(`/stores/${id}`).then(r => r.data);

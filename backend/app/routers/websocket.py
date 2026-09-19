@@ -104,16 +104,16 @@ async def ws_camera_stream(websocket: WebSocket, job_id: str):
 
     await websocket.accept()
     q = frame_streamer.register(job_id)
+    loop = asyncio.get_event_loop()
     try:
         while True:
             try:
                 frame_bytes = await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(None, lambda: q.get(timeout=3.0)),
+                    loop.run_in_executor(None, q.get, True, 3.0),
                     timeout=4.0
                 )
                 await websocket.send_bytes(frame_bytes)
             except (asyncio.TimeoutError, _queue.Empty):
-                # Send ping to keep connection alive
                 try:
                     await websocket.send_text('{"type":"ping"}')
                 except Exception:

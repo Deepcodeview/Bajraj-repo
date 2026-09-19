@@ -128,6 +128,7 @@ class RtspAnalyticsRequest(BaseModel):
     stream_type:      str  = "sub"  # "sub" = sub-stream (AI), "main" = main stream (high-res)
     camera_id:        str  = "unknown"
     camera_name:      str  = ""
+    dataset_rtsp_url: str  = ""   # high-res URL for face recognition (optional)
     zones:      str = "[]"
     entry_zone: str = "[]"
     exit_zone:  str = "[]"
@@ -154,7 +155,7 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
     if req.rtsp_url:
         # Explicit URL provided — use as-is
         ai_url   = req.rtsp_url
-        face_url = req.rtsp_url
+        face_url = req.dataset_rtsp_url or req.rtsp_url
     elif cam_meta:
         if req.stream_type == "main":
             # User selected main stream — use main for both AI and face
