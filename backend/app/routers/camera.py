@@ -4,6 +4,8 @@ routers/camera.py — Live Camera Endpoints for Retail AI System
 import asyncio
 import uuid
 import cv2
+import time
+import threading
 import numpy as np
 from datetime import datetime
 from fastapi import APIRouter, File, UploadFile, Query
@@ -11,7 +13,6 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
 from app.services.oakd_camera import start_camera, stop_camera, get_frame, get_status, start_http_camera
-import threading
 
 router = APIRouter(prefix="/camera", tags=["camera"])
 
