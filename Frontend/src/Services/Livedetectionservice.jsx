@@ -68,7 +68,7 @@ export const fetchJobResult = async (jobId) => {
     if (res.status === 404) return { stale: true };
     if (!res.ok) return null;
     const data = await res.json();
-    if (data.status === 'FAILED') return { stale: true };
+    if (data.status === 'FAILED' || data.status === 'COMPLETED') return { stale: true };
     return data;
   } catch { return null; }
 };

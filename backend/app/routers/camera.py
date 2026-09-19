@@ -84,6 +84,8 @@ def list_cameras():
 
 # ── Active RTSP jobs — per job_id tracking ───────────────────────────────────
 _active_rtsp_jobs: dict[str, str] = {}  # job_id → rtsp_url
+_job_stop_events: dict[str, threading.Event] = {}  # job_id → stop_event
+_camera_active_jobs: dict[str, str] = {}  # camera_id → job_id
 
 # ── Session-level live tracking ───────────────────────────────────────────────
 _session = {
@@ -170,8 +172,21 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
 
     cam_id = cam_meta["id"] if cam_meta else req.camera_id
 
+    # If this camera already has a running job, stop it first so RTSP socket is released cleanly!
+    if cam_id in _camera_active_jobs:
+        old_jid = _camera_active_jobs.pop(cam_id, None)
+        if old_jid:
+            old_evt = _job_stop_events.pop(old_jid, None)
+            if old_evt:
+                old_evt.set()
+            _active_rtsp_jobs.pop(old_jid, None)
+            time.sleep(0.3)
+
     job_id = str(uuid.uuid4())
+    stop_event = threading.Event()
     _active_rtsp_jobs[job_id] = ai_url
+    _job_stop_events[job_id] = stop_event
+    _camera_active_jobs[cam_id] = job_id
 
     try:
         from app.database.db import SessionLocal
@@ -195,6 +210,7 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
             "dataset_rtsp_url": face_url,
             "camera_id":        cam_id,
             "camera_name":      req.camera_name or cam_id,
+            "stop_event":       stop_event,
         },
         daemon=True,
     ).start()
@@ -649,6 +665,13 @@ async def stop_rtsp_job(job_id: str):
     import datetime
 
     _active_rtsp_jobs.pop(job_id, None)
+    stop_evt = _job_stop_events.pop(job_id, None)
+    if stop_evt:
+        stop_evt.set()
+
+    for cid, jid in list(_camera_active_jobs.items()):
+        if jid == job_id:
+            _camera_active_jobs.pop(cid, None)
 
     db = SessionLocal()
     try:
@@ -686,6 +709,11 @@ async def stop_all_rtsp_jobs():
     from app.database.db import SessionLocal
     from app.database.models import AnalyticsJob, JobStatus
     import datetime
+
+    for stop_evt in _job_stop_events.values():
+        stop_evt.set()
+    _job_stop_events.clear()
+    _camera_active_jobs.clear()
 
     stopped = list(_active_rtsp_jobs.keys())
     _active_rtsp_jobs.clear()

@@ -509,7 +509,8 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
 def _run_analysis(file_path: str, job_id: str, zones_data: list = None,
                   entry_zone_data: list = None, exit_zone_data: list = None,
                   conf: float = 0.35, mode: str = "indoor", dataset_rtsp_url: str = "",
-                  camera_id: str = "unknown", camera_name: str = "") -> None:
+                  camera_id: str = "unknown", camera_name: str = "",
+                  stop_event: threading.Event = None) -> None:
     """Runs in a daemon thread. Updates DB throughout processing."""
     from app.database.db import SessionLocal
 
@@ -546,6 +547,7 @@ def _run_analysis(file_path: str, job_id: str, zones_data: list = None,
             dataset_rtsp_url=dataset_rtsp_url,
             camera_id=camera_id,
             camera_name=camera_name,
+            stop_event=stop_event,
         )
 
         is_rtsp = isinstance(file_path, str) and file_path.startswith("rtsp://")
