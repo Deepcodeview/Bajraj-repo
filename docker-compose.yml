@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartretail-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: bachraj_smart_retails
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bachraj_smart_retails"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nodejs:
+    build:
+      context: ./nodejs
+      dockerfile: Dockerfile
+    container_name: smartretail-nodejs
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      DATABASE_URL: "postgresql://postgres:12345@postgres:5432/bachraj_smart_retails"
+      JWT_SECRET: "bachraj__smart_retail_secret_key"
+      JWT_EXPIRES_IN: "7d"
+      PYTHON_BACKEND_URL: "http://python-backend:8001"
+      AI_SERVICE_API_KEY: "smart-retail-ai-key-2025"
+
+  python-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartretail-python
+    restart: unless-stopped
+    depends_on:
+      - nodejs
+    ports:
+      - "8001:8001"
+    environment:
+      NODEJS_BACKEND_URL: "http://nodejs:8000"
+      NODEJS_AI_API_KEY: "smart-retail-ai-key-2025"
+
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: smartretail-frontend
+    restart: unless-stopped
+    depends_on:
+      - nodejs
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: "http://localhost:8000/api"
+      VITE_AI_BASE: "http://localhost:8001"
+
+volumes:
+  postgres_data:
