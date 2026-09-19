@@ -1,6 +1,6 @@
 import axiosInstance from './axios';
 
-export const AI_BASE = import.meta.env.VITE_AI_BASE || 'https://dev.cvframeiq.com';
+export const AI_BASE = import.meta.env.VITE_AI_BASE || 'http://localhost:8001';
 
 // ch1 = x01 (High Quality), ch2 = x02 (Low Quality/Substream)
 const RTSP_BASE = 'rtsp://frameai:qweRty99@45.121.29.181:30100/Streaming/channels';
@@ -76,17 +76,17 @@ export const fetchJobResult = async (jobId) => {
 // ── Node Backend ──────────────────────────────────────────────────
 export const fetchStores = async () => {
   const res = await axiosInstance.get('/stores');
-  return res.data.data;
+  return res.data.data || [];
 };
 
 export const fetchZones = async (storeId) => {
   const res = await axiosInstance.get('/zones', { params: storeId ? { storeId } : {} });
-  return res.data.data;
+  return res.data.data || [];
 };
 
 export const fetchAlerts = async (storeId) => {
   const res = await axiosInstance.get('/alerts', { params: { limit: 10, status: 'OPEN', ...(storeId && { storeId }) } });
-  return res.data.data;
+  return res.data.data || [];
 };
 
 export const acknowledgeAlert = async (alertId) => {
@@ -94,10 +94,25 @@ export const acknowledgeAlert = async (alertId) => {
   return res.data;
 };
 
+// Footfall from Node backend
+export const fetchFootfallToday = async () => {
+  try {
+    const res = await axiosInstance.get('/footfall/today');
+    return res.data.data || null;
+  } catch { return null; }
+};
+
+export const fetchFootfallCurrent = async () => {
+  try {
+    const res = await axiosInstance.get('/footfall/current');
+    return res.data.data || null;
+  } catch { return null; }
+};
+
 // ── Python AI Server ──────────────────────────────────────────────
 export const fetchAIHealth = async () => {
   try {
-    const res = await fetch(`${AI_BASE}/`);
+    const res = await fetch(`${AI_BASE}/health`);
     if (!res.ok) return { status: 'offline' };
     const data = await res.json();
     return { status: data.status === 'ok' ? 'ok' : 'offline' };

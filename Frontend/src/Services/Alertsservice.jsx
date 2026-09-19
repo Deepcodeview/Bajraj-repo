@@ -12,6 +12,9 @@ export const acknowledgeAlert = (id) =>
 export const resolveAlert = (id, resolutionNotes) =>
   axiosInstance.patch(`/alerts/${id}/resolve`, { resolutionNotes }).then(r => r.data);
 
+export const evaluateUnattendedCustomer = (sessionId) =>
+  axiosInstance.post(`/alerts/evaluate/unattended/${sessionId}`).then(r => r.data);
+
 export const getAlertReport = (params) =>
   axiosInstance.get('/alerts/report', { params }).then(r => r.data);
 

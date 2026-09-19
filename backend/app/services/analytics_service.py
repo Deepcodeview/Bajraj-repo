@@ -282,12 +282,13 @@ def process_video(
             log.warning(f"[{job_id}] out_of_stock.pt not found")
 
     # ── Open cap (non-RTSP) ───────────────────────────────────────────────────
+    _first_frame = None
     if is_rtsp:
         log.info(f"[{job_id}] Draining stale RTSP frames...")
         for _ in range(5):   # sirf 5 frames drain — fast start
             ret, _f = cap.read()
             if ret and _f is not None:
-                annotated_holder[0] = _f  # pehle frame se hi stream shuru
+                _first_frame = _f
                 break
     else:
         try:
@@ -310,7 +311,7 @@ def process_video(
     frame_queue  = queue.Queue(maxsize=2)   # small — always process latest frame
     main_stop    = stop_event
     frame_holder = [None]
-    annotated_holder = [None]  # AI writes latest annotated frame here
+    annotated_holder = [_first_frame]  # seed with first frame for instant stream
 
     threading.Thread(target=_dataset_writer_thread, args=(save_queue,), daemon=True).start()
 

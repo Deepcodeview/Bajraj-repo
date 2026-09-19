@@ -1,4 +1,4 @@
-import { createZone, getZones, getZoneById, updateZone, updateZonePolygon, deleteZone } from "./zone.service.js";
+import { createZone, getZones, getZoneById, updateZone, updateZonePolygon, deleteZone, createDwellLog, getDwellLogs } from "./zone.service.js";
 
 // Same store-lock pattern as employees: a store-scoped ADMIN can't act
 // outside their own store, regardless of what's in the body/query.
@@ -82,5 +82,24 @@ export async function deleteZoneController(req, res) {
     return res.status(200).json({ success: true, message: "Zone deleted successfully" });
   } catch (error) {
     return res.status(404).json({ success: false, message: error.message });
+  }
+}
+
+export async function createDwellLogController(req, res) {
+  try {
+    const log = await createDwellLog(req.body);
+    return res.status(201).json({ success: true, data: log });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+}
+
+export async function getDwellLogsController(req, res) {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const logs  = await getDwellLogs(req.params.id, limit);
+    return res.status(200).json({ success: true, data: logs });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 }

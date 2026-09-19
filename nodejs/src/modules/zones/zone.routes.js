@@ -7,6 +7,8 @@ import {
   updateZoneController,
   updateZonePolygonController,
   deleteZoneController,
+  createDwellLogController,
+  getDwellLogsController,
 } from "./zone.controller.js";
 
 import { authenticate, authorize } from "../../middleware/auth.middleware.js";
@@ -16,11 +18,13 @@ const router = express.Router();
 
 router.use(authenticate, authorize("SUPER_ADMIN", "ADMIN"));
 
-router.post("/",                  validateCreateZone,   createZoneController);
-router.get("/",                                         getZonesController);
-router.get("/:id",                                      getZoneByIdController);
-router.patch("/:id",                                    updateZoneController);
-router.patch("/:id/polygon",      validateUpdatePolygon, updateZonePolygonController);
-router.delete("/:id",                                   deleteZoneController);
+router.post("/",             validateCreateZone,    createZoneController);
+router.get("/",                                      getZonesController);
+router.get("/:id",                                   getZoneByIdController);
+router.patch("/:id",                                 updateZoneController);
+router.patch("/:id/polygon", validateUpdatePolygon,  updateZonePolygonController);
+router.delete("/:id",                                deleteZoneController);
+router.post("/dwell",                                createDwellLogController);
+router.get("/:id/dwell",                             getDwellLogsController);
 
 export default router;
