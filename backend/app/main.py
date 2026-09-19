@@ -29,6 +29,7 @@ from app.routers.edge        import router as edge_router
 from app.routers.face        import router as face_router
 from app.routers.employees   import router as employees_router
 from app.routers.footfall    import router as footfall_router
+from app.routers.chunker     import router as chunker_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,6 +57,14 @@ async def lifespan(app: FastAPI):
             logging.getLogger("main").warning(f"Model preload error: {e}")
     threading.Thread(target=_preload, daemon=True, name="model-preloader").start()
     yield
+    # Graceful shutdown: stop all video recorders and workers cleanly
+    try:
+        from app.services.video_chunker import video_chunk_manager
+        from app.services.chunk_ai_worker import chunk_ai_worker
+        video_chunk_manager.stop_all()
+        chunk_ai_worker.stop()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -78,6 +87,7 @@ app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(agents_router)
 app.include_router(camera_router)
+app.include_router(chunker_router)
 app.include_router(reports_router)
 app.include_router(ws_router)
 app.include_router(trends_router)
@@ -95,3 +105,4 @@ app.include_router(edge_router)
 app.include_router(face_router)
 app.include_router(employees_router)
 app.include_router(footfall_router)
+

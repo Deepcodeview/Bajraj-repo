@@ -52,6 +52,8 @@ services:
     environment:
       NODEJS_BACKEND_URL: "http://nodejs:8000"
       NODEJS_AI_API_KEY: "smart-retail-ai-key-2025"
+    volumes:
+      - ./backend/outputs:/app/outputs
 
   frontend:
     build:
