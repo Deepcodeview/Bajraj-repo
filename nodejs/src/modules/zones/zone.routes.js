@@ -6,6 +6,8 @@ import {
   getZoneByIdController,
   updateZoneController,
   deleteZoneController,
+  createDwellLogController,
+  getDwellLogsController,
 } from "./zone.controller.js";
 
 import { authenticate, authorize } from "../../middleware/auth.middleware.js";
@@ -20,5 +22,7 @@ router.get("/", getZonesController);
 router.get("/:id", getZoneByIdController);
 router.patch("/:id", updateZoneController);
 router.delete("/:id", deleteZoneController);
+router.post("/dwell", createDwellLogController);
+router.get("/:id/dwell", getDwellLogsController);
 
 export default router;

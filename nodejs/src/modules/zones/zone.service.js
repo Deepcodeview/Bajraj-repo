@@ -70,3 +70,24 @@ export async function deleteZone(organizationId, zoneId) {
   const zone = await getZoneById(organizationId, zoneId);
   await prisma.zones.delete({ where: { id: zone.id } });
 }
+
+export async function createDwellLog(data) {
+  return prisma.zone_dwell_logs.create({
+    data: {
+      zone_id:       data.zone_id,
+      camera_id:     data.camera_id,
+      person_id:     data.person_id,
+      dwell_seconds: data.dwell_seconds,
+      entered_at:    new Date(data.entered_at),
+      exited_at:     data.exited_at ? new Date(data.exited_at) : null,
+    },
+  });
+}
+
+export async function getDwellLogs(zoneId, limit = 50) {
+  return prisma.zone_dwell_logs.findMany({
+    where:   { zone_id: zoneId },
+    orderBy: { entered_at: 'desc' },
+    take:    limit,
+  });
+}
