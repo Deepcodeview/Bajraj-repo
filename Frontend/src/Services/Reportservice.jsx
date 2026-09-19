@@ -17,3 +17,10 @@ export const getScheduledReports = () =>
 
 export const createScheduledReport = (data) =>
   axiosInstance.post('/reports/scheduled', data).then(r => r.data);
+
+// Footfall reports (from footfall module)
+export const getFootfallToday = () =>
+  axiosInstance.get('/footfall/today').then(r => r.data);
+
+export const getFootfallRange = (start_date, end_date) =>
+  axiosInstance.get('/footfall/range', { params: { start_date, end_date } }).then(r => r.data);
