@@ -91,7 +91,7 @@ router.post("/face-attendance", async (req, res) => {
 router.get("/zones", async (req, res) => {
   try {
     const { camera_code } = req.query;
-    const where = { status: "ACTIVE", NOT: { polygon: null } };
+    const where = { status: "ACTIVE" };
     if (camera_code) {
       where.threshold_config = { path: ["camera_code"], equals: camera_code };
     }
@@ -107,7 +107,8 @@ router.get("/zones", async (req, res) => {
       },
       orderBy: { created_at: "asc" },
     });
-    return res.json({ success: true, zones });
+    const validZones = zones.filter((z) => z.polygon !== null && z.polygon !== undefined);
+    return res.json({ success: true, zones: validZones });
   } catch (e) {
     return res.status(500).json({ success: false, message: e.message });
   }
