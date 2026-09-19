@@ -6,6 +6,7 @@ import uuid
 import cv2
 import time
 import threading
+import logging
 import numpy as np
 from datetime import datetime
 from fastapi import APIRouter, File, UploadFile, Query
@@ -13,6 +14,8 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
 from app.services.oakd_camera import start_camera, stop_camera, get_frame, get_status, start_http_camera
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/camera", tags=["camera"])
 
@@ -674,10 +677,12 @@ async def stop_rtsp_job(job_id: str):
     from app.database.models import AnalyticsJob, JobStatus
     import datetime
 
+    log.info(f"[{job_id}] Received request to stop RTSP job")
     _active_rtsp_jobs.pop(job_id, None)
     stop_evt = _job_stop_events.pop(job_id, None)
     if stop_evt:
         stop_evt.set()
+        log.info(f"[{job_id}] stop_event has been set to True")
 
     for cid, jid in list(_camera_active_jobs.items()):
         if jid == job_id:
@@ -720,6 +725,7 @@ async def stop_all_rtsp_jobs():
     from app.database.models import AnalyticsJob, JobStatus
     import datetime
 
+    log.info(f"Stopping all active RTSP jobs ({len(_job_stop_events)} active)")
     for stop_evt in _job_stop_events.values():
         stop_evt.set()
     _job_stop_events.clear()
