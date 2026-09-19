@@ -41,7 +41,7 @@ export async function getReportsHistory(organizationId, { type, page = 1, limit 
 
 // ── Generate Report ───────────────────────────────────────────────────────────
 
-export async function generateReport(organizationId, { type, startDate, endDate, date, storeId }) {
+export async function generateReport(organizationId, { type, startDate, endDate, date, storeId, filter }) {
   const org = await prisma.organizations.findFirst({ where: { id: organizationId } });
 
   let fileSize = "0 KB";
@@ -57,7 +57,7 @@ export async function generateReport(organizationId, { type, startDate, endDate,
   }
 
   if (type === "sales" || type === "Sales") {
-    const report  = await getSalesReport(organizationId, { startDate, endDate, storeId });
+    const report  = await getSalesReport(organizationId, { startDate, endDate, storeId, filter });
     pdfBuffer     = await generateSalesPdf(report);
     fileSize      = `${(pdfBuffer.length / 1024).toFixed(1)} KB`;
   }

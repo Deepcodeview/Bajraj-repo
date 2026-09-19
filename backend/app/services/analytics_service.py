@@ -539,6 +539,9 @@ def process_video(
                     shelf_result = shelf_detector.detect(frame)
                     from app.services.alert_engine import alert_engine as _ae
                     _ae.check_shelf_empty(camera_id, shelf_result["status"], pipeline.store_id)
+                    # ── Stock missing report + screenshot ─────────────────────
+                    from app.services.stock_report import maybe_report
+                    maybe_report(camera_id, shelf_result, annotated_holder[0])
                 except Exception as e:
                     log.warning(f"[{job_id}] Shelf error: {e}")
 

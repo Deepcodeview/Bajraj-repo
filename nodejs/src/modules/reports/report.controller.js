@@ -21,9 +21,9 @@ export async function getReportsHistoryController(req, res) {
 
 export async function generateReportController(req, res) {
   try {
-    const { type, startDate, endDate, date, storeId } = req.body;
+    const { type, startDate, endDate, date, storeId, filter } = req.body;
     if (!type) return res.status(400).json({ success: false, message: "type is required" });
-    const data = await generateReport(req.user.organizationId, { type, startDate, endDate, date, storeId });
+    const data = await generateReport(req.user.organizationId, { type, startDate, endDate, date, storeId, filter });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
