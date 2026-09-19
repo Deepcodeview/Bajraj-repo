@@ -193,7 +193,7 @@ const Employees = () => {
               {[
                 { label: 'First Name *', key: 'firstName', type: 'text', required: true },
                 { label: 'Last Name',    key: 'lastName',  type: 'text' },
-                { label: 'Employee Code (auto-generated if empty)', key: 'employeeCode', type: 'text' },
+                { label: 'Employee Code *', key: 'employeeCode', type: 'text', required: true },
                 { label: 'Email',  key: 'email', type: 'email' },
                 { label: 'Phone',  key: 'phone', type: 'text' },
               ].map(f => (

@@ -138,7 +138,9 @@ const Attendance = () => {
                         <td style={{ padding: '13px 20px', fontSize: 14, color: '#374151' }}>{r.checkOut || '--'}</td>
                         <td style={{ padding: '13px 20px', fontSize: 14, color: '#374151' }}>{r.duration || '--'}</td>
                         <td style={{ padding: '13px 20px' }}>
-                          <span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, ...(statusColor[r.status] || { bg: '#f3f4f6', color: '#374151' }), background: (statusColor[r.status] || {}).bg }}>
+                          <span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                            background: statusColor[r.status]?.bg || '#f3f4f6',
+                            color: statusColor[r.status]?.color || '#374151' }}>
                             {r.status}
                           </span>
                         </td>

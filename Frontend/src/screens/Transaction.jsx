@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, CreditCard, Download, ReceiptText, RotateCcw, Shopp
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { getTransactions, getTransactionSummary, getTransactionTrend, getPaymentMethodSplit } from '../Services/Transactionservice';
+import { getTransactions, getTransactionSummary, getTransactionTrend, getPaymentMethodSplit, exportTransactions } from '../Services/Transactionservice';
 import '../Style/Transaction.css';
 
 const TxCard = ({ children, className = '' }) => <section className={`tx-card ${className}`}>{children}</section>;
@@ -37,6 +37,22 @@ export default function Transaction() {
   const [paymentSplit, setPaymentSplit] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportTransactions({});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `transactions_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Export failed: ' + e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -97,7 +113,9 @@ export default function Transaction() {
 
           <div className="tx-actions">
             <div className="tx-search">Search transaction ID, customer...</div>
-            <button className="tx-button"><Download size={14} /> Export Report</button>
+            <button className="tx-button" onClick={handleExport} disabled={exporting}>
+              <Download size={14} /> {exporting ? 'Exporting...' : 'Export Report'}
+            </button>
           </div>
 
           {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 7, color: '#dc2626', fontSize: 13 }}>{error}</div>}
