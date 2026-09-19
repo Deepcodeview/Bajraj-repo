@@ -104,10 +104,10 @@ class CameraChunkRecorder:
 
         def _open_cap():
             if is_rtsp:
-                # Force TCP transport & fast timeout
+                # Force TCP transport & safe timeout for WAN RTSP
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
                     "rtsp_transport;tcp|buffer_size;2048000"
-                    "|max_delay;500000|stimeout;10000000"
+                    "|max_delay;500000|stimeout;35000000"
                     "|reorder_queue_size;500|loglevel;quiet"
                 )
                 c = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
@@ -121,6 +121,8 @@ class CameraChunkRecorder:
         cap = _open_cap()
         frame_counter = 0
         t0 = time.time()
+        last_frame_time = time.time()
+        reconnect_cooldown = time.time() + 15.0
         reconnect_delay = 2.0
 
         while self._running:
@@ -131,10 +133,16 @@ class CameraChunkRecorder:
                 cap = _open_cap()
                 continue
 
-            ret, frame = cap.read()
+            ret, frame = False, None
+            try:
+                ret, frame = cap.read()
+            except Exception:
+                pass
+
             if ret and frame is not None:
                 reconnect_delay = 2.0
                 now = time.time()
+                last_frame_time = now
                 with self._lock:
                     self._latest_frame = frame
                     self._last_frame_time = now
@@ -148,10 +156,19 @@ class CameraChunkRecorder:
                 self.stats["status"] = "running"
             else:
                 if is_rtsp:
-                    log.warning(f"[{self.camera_id}] Read failed on RTSP, reconnecting...")
-                    cap.release()
-                    time.sleep(1.0)
-                    cap = _open_cap()
+                    now = time.time()
+                    if (now - last_frame_time > 20.0) and (now > reconnect_cooldown):
+                        log.warning(f"[{self.camera_id}] No frames for >20s on RTSP, reconnecting...")
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        time.sleep(1.0)
+                        cap = _open_cap()
+                        last_frame_time = time.time()
+                        reconnect_cooldown = time.time() + 15.0
+                    else:
+                        time.sleep(0.04)
                 else:
                     time.sleep(0.02)
 

@@ -749,15 +749,19 @@ async def rtsp_preview_frame(rtsp_url: str = "", camera_id: str = "", stream_typ
             raise HTTPException(400, "Provide rtsp_url or valid camera_id")
         channel  = cam_meta["main_channel"] if stream_type == "main" else cam_meta["sub_channel"]
         rtsp_url = f"{RTSP_BASE}{channel}"
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|buffer_size;2000000"
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|buffer_size;2000000|stimeout;35000000"
     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     if not cap.isOpened():
         raise HTTPException(503, f"Cannot connect to RTSP stream: {rtsp_url}")
 
-    # Skip more frames for H.265 — needs keyframe to decode cleanly
-    for _ in range(20):
-        cap.read()
-    ret, frame = cap.read()
+    frame = None
+    ret = False
+    for _ in range(30):
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            break
+        time.sleep(0.1)
     cap.release()
 
     if not ret or frame is None:

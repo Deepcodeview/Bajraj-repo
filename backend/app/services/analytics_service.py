@@ -148,11 +148,11 @@ def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: th
     def _connect():
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
             "rtsp_transport;tcp|buffer_size;8000000"
-            "|max_delay;1000000|stimeout;15000000"
+            "|max_delay;1000000|stimeout;35000000"
             "|reorder_queue_size;500|loglevel;quiet"
         )
         c = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-        c.set(cv2.CAP_PROP_BUFFERSIZE, 10)
+        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return c
 
     cap = _connect()
@@ -160,7 +160,13 @@ def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: th
     last_frame_time = time.time()
 
     while not stop_event.is_set():
-        ret, frame = cap.read()
+        ret, frame = False, None
+        try:
+            if cap and cap.isOpened():
+                ret, frame = cap.read()
+        except Exception:
+            pass
+
         if ret and frame is not None:
             frame_holder[0] = frame
             last_frame_time = time.time()
@@ -172,7 +178,11 @@ def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: th
                 frame_holder[0] = None
             if failures >= MAX_FAILURES:
                 log.warning(f"[main_reader] reconnecting in {retry_delay}s...")
-                cap.release()
+                try:
+                    if cap:
+                        cap.release()
+                except Exception:
+                    pass
                 time.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 60.0)
                 cap = _connect()
@@ -180,36 +190,72 @@ def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: th
                 last_frame_time = time.time()
             else:
                 time.sleep(0.2)
-    cap.release()
+    try:
+        if cap:
+            cap.release()
+    except Exception:
+        pass
 
 
-def _frame_reader_thread(cap, frame_queue: queue.Queue, stop_event: threading.Event, job_id: str, is_rtsp: bool, video_path: str):
+def _frame_reader_thread(
+    cap,
+    frame_queue: queue.Queue,
+    stop_event: threading.Event,
+    job_id: str,
+    is_rtsp: bool,
+    video_path: str,
+    annotated_holder: Optional[list] = None,
+):
     """Dedicated thread: reads frames from cap and puts into frame_queue."""
-    MAX_FAILURES = 10 if is_rtsp else 1
-    consecutive_failures = 0
+    last_frame_time = time.time()
+    reconnect_cooldown = time.time() + 15.0
 
     while not stop_event.is_set():
-        ret, frame = cap.read()
+        ret, frame = False, None
+        try:
+            if cap and cap.isOpened():
+                ret, frame = cap.read()
+        except Exception as e:
+            log.warning(f"[{job_id}] cap.read error: {e}")
+            ret, frame = False, None
+
         if not ret or frame is None:
             if is_rtsp:
-                consecutive_failures += 1
-                if consecutive_failures >= MAX_FAILURES:
-                    log.warning(f"[{job_id}] Frame reader reconnecting...")
-                    cap.release()
+                now = time.time()
+                # Reconnect ONLY after 20s of total frame starvation
+                if (now - last_frame_time > 20.0) and (now > reconnect_cooldown):
+                    log.warning(f"[{job_id}] Frame reader timeout (>20s without frames). Reconnecting to RTSP: {video_path}")
+                    try:
+                        if cap:
+                            cap.release()
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
                     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
                         "rtsp_transport;tcp|buffer_size;4000000"
-                        "|max_delay;1000000|stimeout;15000000"
+                        "|max_delay;1000000|stimeout;35000000"
                         "|reorder_queue_size;500|loglevel;quiet"
                     )
-                    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    consecutive_failures = 0
-                time.sleep(0.05)
+                    try:
+                        cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception as ce:
+                        log.error(f"[{job_id}] VideoCapture reconnect failed: {ce}")
+                    last_frame_time = time.time()
+                    reconnect_cooldown = time.time() + 15.0
+                else:
+                    time.sleep(0.04)
                 continue
             else:
                 frame_queue.put(None)  # signal EOF
                 break
-        consecutive_failures = 0
+
+        last_frame_time = time.time()
+
+        # Seed annotated_holder immediately so stream pusher sends real frames to client
+        if annotated_holder is not None and annotated_holder[0] is None:
+            annotated_holder[0] = frame
+
         # Drop stale frames — keep queue fresh (only latest frame matters)
         if frame_queue.full():
             try:
@@ -221,7 +267,11 @@ def _frame_reader_thread(cap, frame_queue: queue.Queue, stop_event: threading.Ev
         except Exception:
             pass
 
-    cap.release()
+    try:
+        if cap:
+            cap.release()
+    except Exception:
+        pass
 
 def process_video(
     video_path: str,
@@ -252,12 +302,18 @@ def process_video(
     if is_rtsp:
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
             "rtsp_transport;tcp|buffer_size;4000000"
-            "|max_delay;1000000|stimeout;15000000"
+            "|max_delay;1000000|stimeout;35000000"
             "|reorder_queue_size;500|loglevel;quiet"
         )
+        log.info(f"[{job_id}] Opening RTSP stream: {video_path}")
         cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 10)
-        log.info(f"[{job_id}] RTSP connected. Loading YOLO...")
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if not cap.isOpened():
+            log.warning(f"[{job_id}] First RTSP open failed, retrying once...")
+            time.sleep(1.0)
+            cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        log.info(f"[{job_id}] RTSP stream initialized (isOpened={cap.isOpened()}). Loading YOLO...")
 
     # ── Load models ───────────────────────────────────────────────────────────
     person_model = _get_person_model()
@@ -284,12 +340,15 @@ def process_video(
     # ── Open cap (non-RTSP) ───────────────────────────────────────────────────
     _first_frame = None
     if is_rtsp:
-        log.info(f"[{job_id}] Draining stale RTSP frames...")
-        for _ in range(5):   # sirf 5 frames drain — fast start
+        log.info(f"[{job_id}] Waiting for initial RTSP keyframe (up to 10s)...")
+        deadline = time.time() + 10.0
+        while time.time() < deadline and not stop_event.is_set():
             ret, _f = cap.read()
             if ret and _f is not None:
                 _first_frame = _f
+                log.info(f"[{job_id}] Initial RTSP frame ready ({_f.shape[1]}x{_f.shape[0]})")
                 break
+            time.sleep(0.1)
     else:
         try:
             source = int(video_path)
@@ -318,7 +377,7 @@ def process_video(
     # Frame reader starts AFTER cap is fully opened and drained
     threading.Thread(
         target=_frame_reader_thread,
-        args=(cap, frame_queue, main_stop, job_id, is_rtsp, video_path),
+        args=(cap, frame_queue, main_stop, job_id, is_rtsp, video_path, annotated_holder),
         daemon=True,
         name=f"frame-reader-{camera_id}",
     ).start()
