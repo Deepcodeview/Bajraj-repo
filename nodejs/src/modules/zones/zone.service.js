@@ -20,20 +20,26 @@ export async function createZone(organizationId, data) {
   return prisma.zones.create({
     data: {
       organization_id: organizationId,
-      store_id: data.storeId,
-      zone_code: data.zoneCode,
-      name: data.name,
-      zone_type: data.zoneType,
-      polygon: data.polygon || null,
+      store_id:        data.storeId,
+      zone_code:       data.zoneCode,
+      name:            data.name,
+      zone_type:       data.zoneType,
+      polygon:         data.polygon   || null,
       threshold_config: data.thresholdConfig || null,
       status: "ACTIVE",
     },
   });
 }
 
-export async function getZones(organizationId, storeId) {
+export async function getZones(organizationId, storeId, cameraCode = null) {
   const where = { organization_id: organizationId };
-  if (storeId) where.store_id = storeId;
+  if (storeId)    where.store_id  = storeId;
+  // camera_code filter: zones whose zone_code starts with cameraCode prefix
+  // e.g. zone_code "cam2_entrance" matches cameraCode "cam2"
+  // Frontend stores camera_code in threshold_config.camera_code for flexibility
+  if (cameraCode) {
+    where.threshold_config = { path: ["camera_code"], equals: cameraCode };
+  }
 
   return prisma.zones.findMany({
     where,
@@ -53,16 +59,25 @@ export async function updateZone(organizationId, zoneId, data) {
   const zone = await getZoneById(organizationId, zoneId);
 
   const updateData = {};
-  if (data.name !== undefined) updateData.name = data.name;
-  if (data.zoneType !== undefined) updateData.zone_type = data.zoneType;
-  if (data.polygon !== undefined) updateData.polygon = data.polygon;
+  if (data.name            !== undefined) updateData.name             = data.name;
+  if (data.zoneType        !== undefined) updateData.zone_type        = data.zoneType;
+  if (data.polygon         !== undefined) updateData.polygon          = data.polygon;
   if (data.thresholdConfig !== undefined) updateData.threshold_config = data.thresholdConfig;
-  if (data.status !== undefined) updateData.status = data.status;
+  if (data.status          !== undefined) updateData.status           = data.status;
   updateData.updated_at = new Date();
 
   return prisma.zones.update({
     where: { id: zone.id },
     data: updateData,
+  });
+}
+
+// Dedicated polygon-only update — called from zone editor UI
+export async function updateZonePolygon(organizationId, zoneId, polygon) {
+  const zone = await getZoneById(organizationId, zoneId);
+  return prisma.zones.update({
+    where: { id: zone.id },
+    data:  { polygon, updated_at: new Date() },
   });
 }
 

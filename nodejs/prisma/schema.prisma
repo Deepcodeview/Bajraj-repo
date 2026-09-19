@@ -721,16 +721,102 @@ model zones {
 }
 
 model zone_dwell_logs {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  zone_id        String   @db.Uuid
-  camera_id      String   @db.VarChar(100)
-  person_id      String   @db.VarChar(150)
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  zone_id        String    @db.Uuid
+  camera_id      String    @db.VarChar(100)
+  person_id      String    @db.VarChar(150)
   dwell_seconds  Int
-  entered_at     DateTime @db.Timestamptz(6)
+  entered_at     DateTime  @db.Timestamptz(6)
   exited_at      DateTime? @db.Timestamptz(6)
-  created_at     DateTime @default(now()) @db.Timestamptz(6)
-  zones          zones    @relation(fields: [zone_id], references: [id], onDelete: Cascade)
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  zones          zones     @relation(fields: [zone_id], references: [id], onDelete: Cascade)
 
-  @@index([zone_id], map: "idx_dwell_zone")
+  @@index([zone_id],    map: "idx_dwell_zone")
   @@index([entered_at], map: "idx_dwell_entered")
+}
+
+// ── AI Analytics Tables (written by Python backend) ──────────────────────────
+
+model footfall_logs {
+  id               Int      @id @default(autoincrement())
+  store_id         String   @db.VarChar(100)
+  camera_id        String   @db.VarChar(50)
+  log_date         String   @db.VarChar(10)
+  entries          Int      @default(0)
+  exits            Int      @default(0)
+  currently_inside Int      @default(0)
+  total_unique     Int      @default(0)
+  wall_time        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([log_date],  map: "idx_footfall_date")
+  @@index([camera_id], map: "idx_footfall_camera")
+  @@index([store_id],  map: "idx_footfall_store")
+}
+
+model person_movement_logs {
+  id          Int      @id @default(autoincrement())
+  store_id    String   @db.VarChar(100)
+  global_id   Int
+  camera_id   String   @db.VarChar(50)
+  camera_name String?  @db.VarChar(100)
+  event_type  String   @db.VarChar(30)
+  zone        String?  @db.VarChar(50)
+  bbox_x1     Int?
+  bbox_y1     Int?
+  bbox_x2     Int?
+  bbox_y2     Int?
+  wall_time   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([camera_id], map: "idx_movement_camera")
+  @@index([wall_time],  map: "idx_movement_time")
+  @@index([store_id],   map: "idx_movement_store")
+}
+
+model ai_alert_logs {
+  id         Int      @id @default(autoincrement())
+  store_id   String   @db.VarChar(100)
+  alert_type String   @db.VarChar(50)
+  severity   String   @default("MEDIUM") @db.VarChar(20)
+  camera_id  String?  @db.VarChar(50)
+  zone       String?  @db.VarChar(50)
+  global_id  Int?
+  message    String
+  extra_data Json?
+  resolved   Boolean  @default(false)
+  wall_time  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([alert_type], map: "idx_ai_alert_type")
+  @@index([wall_time],  map: "idx_ai_alert_time")
+  @@index([store_id],   map: "idx_ai_alert_store")
+}
+
+model customer_journeys {
+  id              Int       @id @default(autoincrement())
+  store_id        String    @db.VarChar(100)
+  global_id       Int
+  journey         Json
+  total_dwell_sec Float     @default(0)
+  zones_visited   Int       @default(0)
+  entry_time      DateTime? @db.Timestamptz(6)
+  exit_time       DateTime? @db.Timestamptz(6)
+  wall_time       DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([global_id], map: "idx_journey_global_id")
+  @@index([wall_time],  map: "idx_journey_time")
+  @@index([store_id],   map: "idx_journey_store")
+}
+
+model face_attendance_logs {
+  id              Int      @id @default(autoincrement())
+  store_id        String   @db.VarChar(100)
+  name            String   @db.VarChar(100)
+  attendance_date String   @db.VarChar(10)
+  first_seen_time DateTime @db.Timestamptz(6)
+  similarity      Float?
+  camera_id       String?  @db.VarChar(50)
+  wall_time       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([store_id, name, attendance_date], map: "uq_face_attendance_per_day")
+  @@index([attendance_date], map: "idx_face_att_date")
+  @@index([store_id],        map: "idx_face_att_store")
 }

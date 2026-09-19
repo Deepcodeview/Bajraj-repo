@@ -30,6 +30,8 @@ SHELF_CONF      = 0.25
 PERSON_CLASS_ID = 0             # COCO class 0 = person
 
 # ── Advanced Detection ───────────────────────
+OUTDOOR_CAMERAS       = {"cam1", "cam4"}  # outdoor cameras — vehicle detection only
+PERSON_CAMERAS        = {"cam2", "cam3", "cam6", "cam7", "cam8"}  # indoor cameras — full person detection + tracking
 LOITERING_THRESH_SEC  = 300  # 5 min — short dwell is normal shopping behaviour
 LOITERING_EXEMPT_CAMERAS = {"cam2", "cam3", "cam6", "cam7", "cam8"}  # indoor shopping cameras — no loitering alerts
 CROWD_THRESH          = 8
@@ -43,7 +45,7 @@ HEATMAP_ALPHA         = 0.30
 
 # ── Tracking ─────────────────────────────────
 IDENTITY_TTL         = 45.0   # seconds to remember a disappeared person
-IDENTITY_DIST_THRESH = 250.0  # px distance to re-match a returning person
+IDENTITY_DIST_THRESH = 400.0  # px distance to re-match a returning person
 
 # ByteTrack tuning (retail CCTV — partial occlusion, slow movement)
 BYTETRACK_TRACK_THRESH    = 0.30   # lowered: catch persons at edge of frame
@@ -58,8 +60,17 @@ FOOTFALL_LINE_RATIO = 0.65
 # ── Video output ─────────────────────────────
 SAVE_ANNOTATED_VIDEO   = True
 ANNOTATION_SKIP_FRAMES = 1      # process every frame for smooth streaming
-STREAM_JPEG_QUALITY    = 65     # lower = faster encoding, smoother stream
-STREAM_RESIZE_WIDTH    = 854    # resize stream to 854px wide (480p) for speed
+STREAM_JPEG_QUALITY    = 65     # used by legacy _stream() calls
+STREAM_RESIZE_WIDTH    = 854    # used by legacy _stream() calls
+
+# ── Independent Stream Pusher ─────────────────
+STREAM_PUSHER_FPS     = 30    # pusher thread target FPS
+STREAM_PUSHER_QUALITY = 40    # JPEG quality for WebSocket stream
+STREAM_PUSHER_WIDTH   = 480   # resize width (480p)
+
+# ── Node.js Integration ─────────────────────
+NODEJS_BACKEND_URL = os.getenv("NODEJS_BACKEND_URL", "http://localhost:8000")
+NODEJS_AI_API_KEY  = os.getenv("NODEJS_AI_API_KEY",  "smart-retail-ai-key-2025")
 
 # ── Dataset Collection ────────────────────────
 DATASET_COLLECT      = True

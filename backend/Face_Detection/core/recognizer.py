@@ -27,7 +27,9 @@ from core.config import (
     INSIGHTFACE_MODEL, DET_SIZE, EMBEDDINGS_FILE,
     SIMILARITY_THRESHOLD, VOTE_FRAMES, MIN_FACE_SIZE, BLUR_THRESHOLD,
     ATTENDANCE_COOLDOWN_SEC, MAX_LOST_FRAMES, MIN_HITS_TO_CONFIRM, IOU_MATCH_THRESHOLD,
+    CAMERA_ID,
 )
+from core.attendance_notifier import notify_attendance
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -127,8 +129,12 @@ class FaceRecognizer:
     def __init__(self):
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-        # InsightFace
-        self.app = FaceAnalysis(name=INSIGHTFACE_MODEL, providers=["CPUExecutionProvider"])
+        # Auto-select GPU if available, fallback to CPU
+        import onnxruntime as ort
+        available = ort.get_available_providers()
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if "CUDAExecutionProvider" in available else ["CPUExecutionProvider"]
+        log.info(f"InsightFace using: {providers[0]}")
+        self.app = FaceAnalysis(name=INSIGHTFACE_MODEL, providers=providers)
         self.app.prepare(ctx_id=0, det_size=DET_SIZE)
 
         # FAISS recognition index
@@ -337,6 +343,7 @@ class FaceRecognizer:
                     "timestamp": now.isoformat(),
                 })
                 log.info(f"EMPLOYEE {name}  sim={sim:.3f}  track={track_id}")
+                notify_attendance(employee_code=name, camera_id=CAMERA_ID, confidence=sim)
 
     # ── Visualization ─────────────────────────────────────────────────────────
 

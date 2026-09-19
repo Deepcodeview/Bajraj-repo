@@ -28,6 +28,7 @@ from app.routers.platform    import router as platform_router
 from app.routers.edge        import router as edge_router
 from app.routers.face        import router as face_router
 from app.routers.employees   import router as employees_router
+from app.routers.footfall    import router as footfall_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +39,22 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Preload all AI models at startup — zero delay on first camera request
+    import threading
+    def _preload():
+        try:
+            from app.services.analytics_service import (
+                _get_person_model, _get_vehicle_model,
+                _get_phone_model, _get_oos_model,
+            )
+            _get_person_model()
+            _get_vehicle_model()
+            _get_phone_model()
+            _get_oos_model()
+        except Exception as e:
+            import logging
+            logging.getLogger("main").warning(f"Model preload error: {e}")
+    threading.Thread(target=_preload, daemon=True, name="model-preloader").start()
     yield
 
 
@@ -77,3 +94,4 @@ app.include_router(platform_router)
 app.include_router(edge_router)
 app.include_router(face_router)
 app.include_router(employees_router)
+app.include_router(footfall_router)

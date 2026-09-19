@@ -20,6 +20,9 @@ VOTE_FRAMES          = 3
 MIN_FACE_SIZE        = 15
 BLUR_THRESHOLD       = 3.0
 
+# Camera identity — must match camera_code in the DB for this camera
+CAMERA_ID = os.getenv("CAMERA_ID", "cam6")
+
 # Attendance
 ATTENDANCE_COOLDOWN_SEC = 60   # same person log once per minute
 
