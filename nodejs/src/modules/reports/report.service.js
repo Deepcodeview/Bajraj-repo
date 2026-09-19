@@ -1,6 +1,8 @@
 import prisma from "../../config/database.js";
 import { getAttendanceReport } from "../attendance/attendance.service.js";
 import { generateAttendancePdf } from "../attendance/attendance.pdf.js";
+import { getSalesReport } from "./sales.service.js";
+import { generateSalesPdf } from "./sales.pdf.js";
 
 // In-memory report store (replace with DB table if needed)
 const _reports    = [];
@@ -46,6 +48,12 @@ export async function generateReport(organizationId, { type, startDate, endDate,
   if (type === "attendance" || type === "Attendance") {
     const report  = await getAttendanceReport(organizationId, { startDate, endDate, date, storeId });
     pdfBuffer     = await generateAttendancePdf(report);
+    fileSize      = `${(pdfBuffer.length / 1024).toFixed(1)} KB`;
+  }
+
+  if (type === "sales" || type === "Sales") {
+    const report  = await getSalesReport(organizationId, { startDate, endDate, storeId });
+    pdfBuffer     = await generateSalesPdf(report);
     fileSize      = `${(pdfBuffer.length / 1024).toFixed(1)} KB`;
   }
 
