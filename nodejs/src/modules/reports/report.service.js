@@ -1,6 +1,8 @@
 import prisma from "../../config/database.js";
 import { getAttendanceReport } from "../attendance/attendance.service.js";
 import { generateAttendancePdf } from "../attendance/attendance.pdf.js";
+import { getSalesReport } from "./sales.service.js";
+import { generateSalesPdf } from "./sales.pdf.js";
 
 const PYTHON_URL = process.env.PYTHON_BACKEND_URL || "http://localhost:8001";
 
@@ -52,6 +54,12 @@ export async function generateReport(organizationId, { type, startDate, endDate,
   } else if (type === "footfall" || type === "Footfall") {
     pdfBuffer = await generateFootfallPdf({ startDate, endDate, date });
     fileSize  = `${(pdfBuffer.length / 1024).toFixed(1)} KB`;
+  }
+
+  if (type === "sales" || type === "Sales") {
+    const report  = await getSalesReport(organizationId, { startDate, endDate, storeId });
+    pdfBuffer     = await generateSalesPdf(report);
+    fileSize      = `${(pdfBuffer.length / 1024).toFixed(1)} KB`;
   }
 
   const record = {
