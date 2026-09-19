@@ -36,7 +36,7 @@ import time
 import logging
 import numpy as np
 import cv2
-from collections import deque
+from collections import deque, defaultdict
 from typing import Optional
 
 from app.reid.global_registry import global_registry
@@ -106,11 +106,21 @@ class PersonPipeline:
         # Face recognizer (lazy load)
         self._face_recognizer = None
 
+        # Vote buffer owned here — keyed by global_id, not track_id
+        # FaceRecognizer.vote_buffer is NOT used by this pipeline
+        self._vote_buffer: defaultdict = defaultdict(lambda: deque(maxlen=3))
+
         # Load enrolled face embeddings into employee_db
         from app.face.config import EMBEDDINGS_FILE
         from app.face.config import SIMILARITY_THRESHOLD as _SIM_THRESH
+        from app.face.config import SIMILARITY_GAP as _SIM_GAP
         self._sim_thresh = _SIM_THRESH
+        self._sim_gap    = _SIM_GAP
         employee_db.load_enrolled(EMBEDDINGS_FILE)
+
+        # Frontend-drawn polygon zones — loaded once at startup per camera
+        self._zones: list = []
+        self._load_zones()
 
     # ── Face recognizer lazy load ─────────────────────────────────────────────
 
@@ -125,13 +135,81 @@ class PersonPipeline:
                 pass
         return self._face_recognizer
 
+    # ── Polygon zone loader ───────────────────────────────────────────────────
+
+    def _load_zones(self):
+        """Fetch frontend-drawn polygon zones from Node.js for this camera.
+        Polygon format: [{"x": 0.1, "y": 0.2}, ...] normalized 0-1.
+        Stored in threshold_config.camera_code to link zone → camera.
+        """
+        try:
+            import urllib.request as _ur
+            import json as _json
+            from app.config import NODEJS_BACKEND_URL, NODEJS_AI_API_KEY
+            url = f"{NODEJS_BACKEND_URL}/api/ai-ingest/zones?camera_code={self.camera_id}"
+            req = _ur.Request(url, headers={"x-ai-service-key": NODEJS_AI_API_KEY})
+            with _ur.urlopen(req, timeout=3) as r:
+                data = _json.loads(r.read())
+            self._zones = [
+                {
+                    "name":    z["zone_code"],
+                    "label":   z["name"],
+                    "type":    z["zone_type"],
+                    "polygon": z["polygon"],   # [{"x":0.1,"y":0.2}, ...]
+                }
+                for z in data.get("zones", [])
+                if z.get("polygon") and len(z["polygon"]) >= 3
+            ]
+            log.info(f"[{self.camera_id}] {len(self._zones)} polygon zone(s) loaded.")
+        except Exception as e:
+            self._zones = []
+            log.debug(f"[{self.camera_id}] Zone load skipped (grid fallback): {e}")
+
+    def reload_zones(self):
+        """Hot-reload zones without restarting camera thread."""
+        self._load_zones()
+        log.info(f"[{self.camera_id}] Zones reloaded: {len(self._zones)} polygon(s).")
+
     # ── Zone assignment ───────────────────────────────────────────────────────
 
     @staticmethod
     def _zone(cx_n: float, cy_n: float) -> str:
+        """Fallback 3x3 grid zone when no polygon matches."""
         row = ZONE_ROWS[min(int(cy_n * 3), 2)]
         col = ZONE_COLS[min(int(cx_n * 3), 2)]
         return f"{row}-{col}"
+
+    def _zone_from_polygons(self, cx_n: float, cy_n: float, w: int, h: int) -> Optional[str]:
+        """cv2.pointPolygonTest — returns zone_code of first matching polygon, else None."""
+        pt = (float(cx_n * w), float(cy_n * h))
+        for z in self._zones:
+            try:
+                poly = np.array(
+                    [[p["x"] * w, p["y"] * h] for p in z["polygon"]],
+                    dtype=np.float32
+                )
+                if cv2.pointPolygonTest(poly, pt, False) >= 0:
+                    return z["name"]   # zone_code e.g. "cam2_entrance"
+            except Exception:
+                continue
+        return None
+
+    def _draw_zones(self, frame: np.ndarray):
+        """Draw all polygon zones on frame — for visual debugging."""
+        h, w = frame.shape[:2]
+        for z in self._zones:
+            try:
+                pts = np.array(
+                    [[int(p["x"] * w), int(p["y"] * h)] for p in z["polygon"]],
+                    dtype=np.int32
+                )
+                cv2.polylines(frame, [pts], isClosed=True, color=(0, 255, 255), thickness=1)
+                cx = int(np.mean(pts[:, 0]))
+                cy = int(np.mean(pts[:, 1]))
+                cv2.putText(frame, z["label"], (cx - 20, cy),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+            except Exception:
+                continue
 
     # ── IoU helper ────────────────────────────────────────────────────────────
 
@@ -218,7 +296,11 @@ class PersonPipeline:
                 self._heatmap[hy, hx] += 1.0
 
                 # ── STEP 3: ZONE ENGINE ───────────────────────────────────────
-                new_zone = self._zone(cx_n, cy_n)
+                # Polygon zones (frontend-drawn) first, fallback to 3x3 grid
+                new_zone = (
+                    self._zone_from_polygons(cx_n, cy_n, w_f, h_f)
+                    or self._zone(cx_n, cy_n)
+                )
                 if ps.zone != new_zone:
                     if ps.zone:
                         alert_engine.person_exited_zone(global_id, ps.zone)
@@ -228,9 +310,8 @@ class PersonPipeline:
 
                 zone_counts[new_zone] = zone_counts.get(new_zone, 0) + 1
 
-                # ── STEP 4: FACE DETECTION (every N frames) ───────────────────
-                # Use high-res main stream frame if available, else sub-stream
-                if self._frame_n % FACE_EVERY_N == 0:
+                # ── STEP 4: FACE DETECTION (cam6 only, every N frames) ─────────
+                if self.camera_id == "cam6" and self._frame_n % FACE_EVERY_N == 0:
                     self._run_face(face_frame if face_frame is not None else frame, ps, global_id)
 
                 # ── STEP 5: BODY TRACKING — name from anchor/cache only ────────
@@ -257,9 +338,15 @@ class PersonPipeline:
                     alert_engine.check_shelf_interaction(
                         global_id, ps.zone or "", self.camera_id, dwell, self.store_id
                     )
+                if self._frame_n % 30 == 0 and not ps.face_confirmed and ps.name is None:
+                    alert_engine.check_stranger(global_id, self.camera_id, self.store_id)
 
                 # ── STEP 7: DRAW on frame ─────────────────────────────────────
                 self._draw_person(frame, ps)
+
+        # Draw polygon zone boundaries on frame (cyan outlines)
+        if self._zones:
+            self._draw_zones(frame)
 
         # ── Handle disappeared persons ────────────────────────────────────────
         disappeared = set(self._persons.keys()) - active_gids
@@ -301,14 +388,37 @@ class PersonPipeline:
         if fr is None:
             return
         try:
-            faces = fr.app.get(frame)
+            # Crop top 55% of person bbox — head/face region — then upscale for InsightFace
+            bx1, by1, bx2, by2 = ps.bbox
+            crop_h = int((by2 - by1) * 0.55)
+            face_crop = frame[max(0, by1):by1 + crop_h, max(0, bx1):bx2]
+            if face_crop.size == 0:
+                return
+            # Upscale if too small for InsightFace
+            fh, fw = face_crop.shape[:2]
+            if fw < 112 or fh < 112:
+                scale = max(112 / fw, 112 / fh)
+                face_crop = cv2.resize(face_crop, (int(fw * scale), int(fh * scale)),
+                                       interpolation=cv2.INTER_CUBIC)
+            # CLAHE on crop if dark
+            if cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY).mean() < 80:
+                lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
+                l, a, b = cv2.split(lab)
+                cl = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4)).apply(l)
+                face_crop = cv2.cvtColor(cv2.merge([cl, a, b]), cv2.COLOR_LAB2BGR)
+
+            faces = fr.app.get(face_crop)
             for face in faces:
                 fx1, fy1, fx2, fy2 = map(int, face.bbox)
-                fx_c = (fx1 + fx2) / 2
-                fy_c = (fy1 + fy2) / 2
-                bx1, by1, bx2, by2 = ps.bbox
-                if not (bx1 <= fx_c <= bx2 and by1 <= fy_c <= by2):
-                    continue
+
+                # Remap face bbox back to original frame coords for drawing
+                orig_fx1 = bx1 + fx1
+                orig_fy1 = by1 + fy1
+                orig_fx2 = bx1 + fx2
+                orig_fy2 = by1 + fy2
+
+                # Cyan box on face (original frame coords)
+                cv2.rectangle(frame, (orig_fx1, orig_fy1), (orig_fx2, orig_fy2), (255, 255, 0), 2)
 
                 face_emb = face.normed_embedding
 
@@ -318,20 +428,24 @@ class PersonPipeline:
                 if hasattr(face, 'gender') and face.gender is not None:
                     ps.gender = "M" if face.gender == 1 else "F"
 
-                # Vote buffer for stability
+                # Already confirmed — just touch anchor, skip re-voting
+                if ps.face_confirmed:
+                    name_anchor.touch(global_id, self.camera_id)
+                    break
+
+                # Vote buffer (owned by PersonPipeline, keyed by global_id)
+                # 3 frames mein 2 baar same name + sim >= 0.62 + gap >= 0.06 → confirm
                 raw_name, sim = fr._recognize(face_emb)
-                fr.vote_buffer[global_id].append(raw_name)
-                votes = fr.vote_buffer[global_id]
+                self._vote_buffer[global_id].append(raw_name)
+                votes = self._vote_buffer[global_id]
                 if len(votes) < 3:
                     continue
-                # Majority must be non-Unknown AND sim must be above threshold
                 name_votes = [v for v in votes if v != "Unknown"]
                 if len(name_votes) < 2 or sim < self._sim_thresh:
                     continue
                 confirmed = max(set(name_votes), key=name_votes.count)
 
                 # Confirm in employee_db (face + body combined)
-                body_emb = ps._body_emb if hasattr(ps, '_body_emb') else None
                 employee_db.confirm_face(global_id, confirmed, face_emb, sim,
                                          camera_id=self.camera_id)
 
@@ -409,6 +523,7 @@ class PersonPipeline:
 
     def reset(self):
         self._persons.clear()
+        self._vote_buffer.clear()
         self._heatmap = None
         self._frame_n = 0
 
@@ -419,25 +534,13 @@ def _save_attendance(name: str, sim: float, camera_id: str, store_id: str):
     import threading
     def _run():
         try:
-            from datetime import datetime
-            from app.database.db import SessionLocal
-            from app.database.models import AttendanceLog
-            today = datetime.utcnow().strftime("%Y-%m-%d")
-            with SessionLocal() as db:
-                exists = db.query(AttendanceLog).filter(
-                    AttendanceLog.name == name,
-                    AttendanceLog.attendance_date == today,
-                    AttendanceLog.store_id == store_id,
-                ).first()
-                if not exists:
-                    db.add(AttendanceLog(
-                        store_id=store_id, name=name, type="employee",
-                        attendance_date=today,
-                        first_seen_time=datetime.utcnow(),
-                        similarity=sim, camera_id=camera_id,
-                    ))
-                    db.commit()
-                    log.info(f"Attendance saved: {name} on {today}")
+            from datetime import datetime, timezone, timedelta
+            from app.services.pg_sync import sync_face_attendance
+            IST = timezone(timedelta(hours=5, minutes=30))
+            now_ist = datetime.now(IST)
+            today = now_ist.strftime("%Y-%m-%d")
+            sync_face_attendance(name, today, now_ist.isoformat(), sim, camera_id, store_id)
+            log.info(f"Attendance synced to PostgreSQL: {name} on {today}")
         except Exception as e:
             log.debug(f"Attendance save failed: {e}")
     threading.Thread(target=_run, daemon=True).start()
@@ -447,21 +550,9 @@ def _log_movement(global_id, camera_id, camera_name, event_type, zone, box):
     import threading
     def _run():
         try:
-            from datetime import datetime
-            from app.database.db import SessionLocal
-            from app.database.models import PersonMovementLog
-            with SessionLocal() as db:
-                db.add(PersonMovementLog(
-                    global_id=global_id, camera_id=camera_id,
-                    camera_name=camera_name, event_type=event_type,
-                    zone=zone,
-                    bbox_x1=int(box[0]) if box else None,
-                    bbox_y1=int(box[1]) if box else None,
-                    bbox_x2=int(box[2]) if box else None,
-                    bbox_y2=int(box[3]) if box else None,
-                    wall_time=datetime.utcnow(),
-                ))
-                db.commit()
+            from app.services.pg_sync import sync_movement
+            sync_movement(global_id, camera_id, camera_name or "", event_type,
+                          zone or "", list(map(int, box)) if box else [], "store_1")
         except Exception:
             pass
     threading.Thread(target=_run, daemon=True).start()

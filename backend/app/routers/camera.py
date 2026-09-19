@@ -50,30 +50,34 @@ _retail_state = {
     "cam_metrics": {},
 }
 
+# Hikvision channel convention:
+#   main stream  = x01  (high-res, e.g. 1080p — used for face recognition on cam6)
+#   sub stream   = x02  (low-res,  e.g. 480p  — used for AI/YOLO processing)
 ALL_CAMERAS = [
-    {"id": "cam1", "name": "CAM-1", "channel": 101, "main_channel": 101, "label": "Entrance / Main Gate",  "color": "#0057ff", "mode": "outdoor"},
-    {"id": "cam2", "name": "CAM-2", "channel": 201, "main_channel": 201, "label": "Section A / Aisle",     "color": "#16a34a", "mode": "indoor"},
-    {"id": "cam3", "name": "CAM-3", "channel": 301, "main_channel": 301, "label": "Section B / Shelves",   "color": "#a855f7", "mode": "indoor"},
-    {"id": "cam4", "name": "CAM-4", "channel": 401, "main_channel": 401, "label": "Checkout / Exit",       "color": "#ef4444", "mode": "outdoor"},
-    {"id": "cam5", "name": "CAM-5", "channel": 501, "main_channel": 501, "label": "Storage / Back Area",   "color": "#f59e0b", "mode": "vehicle"},
-    {"id": "cam6", "name": "CAM-6", "channel": 601, "main_channel": 601, "label": "Cash Counter",          "color": "#06b6d4", "mode": "indoor"},
-    {"id": "cam7", "name": "CAM-7", "channel": 701, "main_channel": 701, "label": "Parking / Exterior",    "color": "#ec4899", "mode": "indoor"},
-    {"id": "cam8", "name": "CAM-8", "channel": 801, "main_channel": 801, "label": "Loading Dock",          "color": "#84cc16", "mode": "indoor"},
+    {"id": "cam1", "name": "CAM-1", "sub_channel": 102, "main_channel": 101, "label": "Entrance / Main Gate",  "color": "#0057ff", "mode": "outdoor"},
+    {"id": "cam2", "name": "CAM-2", "sub_channel": 202, "main_channel": 201, "label": "Section A / Aisle",     "color": "#16a34a", "mode": "indoor"},
+    {"id": "cam3", "name": "CAM-3", "sub_channel": 302, "main_channel": 301, "label": "Section B / Shelves",   "color": "#a855f7", "mode": "indoor"},
+    {"id": "cam4", "name": "CAM-4", "sub_channel": 402, "main_channel": 401, "label": "Checkout / Exit",       "color": "#ef4444", "mode": "outdoor"},
+    {"id": "cam5", "name": "CAM-5", "sub_channel": 502, "main_channel": 501, "label": "Storage / Back Area",   "color": "#f59e0b", "mode": "vehicle"},
+    {"id": "cam6", "name": "CAM-6", "sub_channel": 602, "main_channel": 601, "label": "Cash Counter",          "color": "#06b6d4", "mode": "indoor"},
+    {"id": "cam7", "name": "CAM-7", "sub_channel": 702, "main_channel": 701, "label": "Parking / Exterior",    "color": "#ec4899", "mode": "indoor"},
+    {"id": "cam8", "name": "CAM-8", "sub_channel": 802, "main_channel": 801, "label": "Loading Dock",          "color": "#84cc16", "mode": "indoor"},
 ]
 
 
 @router.get("/list")
 def list_cameras():
-    """Return all available RTSP cameras with their metadata + active job_id if running."""
-    # Build reverse map: rtsp_url → job_id
+    """Return all available RTSP cameras with sub + main stream URLs + active job_id."""
     url_to_job = {url: jid for jid, url in _active_rtsp_jobs.items()}
     cameras = []
     for cam in ALL_CAMERAS:
-        rtsp_url = f"{RTSP_BASE}{cam['channel']}"
+        sub_url  = f"{RTSP_BASE}{cam['sub_channel']}"
+        main_url = f"{RTSP_BASE}{cam['main_channel']}"
         cameras.append({
             **cam,
-            "rtsp_url": rtsp_url,
-            "job_id": url_to_job.get(rtsp_url),
+            "sub_stream_url":  sub_url,
+            "main_stream_url": main_url,
+            "job_id": url_to_job.get(sub_url) or url_to_job.get(main_url),
         })
     return {"cameras": cameras, "total": len(ALL_CAMERAS), "rtsp_base": RTSP_BASE}
 
@@ -120,20 +124,21 @@ async def camera_start_stream(req: HttpCameraRequest):
 
 # ── RTSP → Full Analytics Pipeline ───────────────────────────────────────────
 class RtspAnalyticsRequest(BaseModel):
-    rtsp_url:         str
-    dataset_rtsp_url: str = ""   # main stream (x01) for high-res dataset capture
+    rtsp_url:         str  = ""   # explicit URL (optional — overrides stream_type)
+    stream_type:      str  = "sub"  # "sub" = sub-stream (AI), "main" = main stream (high-res)
+    camera_id:        str  = "unknown"
+    camera_name:      str  = ""
     zones:      str = "[]"
     entry_zone: str = "[]"
     exit_zone:  str = "[]"
     conf:       float = 0.35
     mode:       str = "indoor"  # "indoor" = full tracking, "outdoor" = count only
-    camera_id:   str = "unknown"  # e.g. "cam1"
-    camera_name: str = ""         # e.g. "Entrance / Main Gate"
 
 
 @router.post("/rtsp/start")
 async def start_rtsp_analytics(req: RtspAnalyticsRequest):
     from app.api.routes import _run_analysis
+    from fastapi import HTTPException
     import json
 
     try:
@@ -141,20 +146,39 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
         entry_zone_pts = json.loads(req.entry_zone)
         exit_zone_pts  = json.loads(req.exit_zone)
     except Exception:
-        from fastapi import HTTPException
         raise HTTPException(400, "Invalid JSON in zones/entry_zone/exit_zone")
 
-    job_id = str(uuid.uuid4())
-    _active_rtsp_jobs[job_id] = req.rtsp_url
+    # ── Resolve camera + stream URLs ─────────────────────────────────────────
+    cam_meta = next((c for c in ALL_CAMERAS if c["id"] == req.camera_id), None)
 
-    # Write job to DB in a short-lived session
+    if req.rtsp_url:
+        # Explicit URL provided — use as-is
+        ai_url   = req.rtsp_url
+        face_url = req.rtsp_url
+    elif cam_meta:
+        if req.stream_type == "main":
+            # User selected main stream — use main for both AI and face
+            ai_url   = f"{RTSP_BASE}{cam_meta['main_channel']}"
+            face_url = ai_url
+        else:
+            # Default: sub stream for AI (YOLO), main stream for face recognition (cam6 only)
+            ai_url   = f"{RTSP_BASE}{cam_meta['sub_channel']}"
+            face_url = f"{RTSP_BASE}{cam_meta['main_channel']}" if req.camera_id == "cam6" else ""
+    else:
+        raise HTTPException(400, "Provide rtsp_url or a valid camera_id")
+
+    cam_id = cam_meta["id"] if cam_meta else req.camera_id
+
+    job_id = str(uuid.uuid4())
+    _active_rtsp_jobs[job_id] = ai_url
+
     try:
         from app.database.db import SessionLocal
         from app.database.models import AnalyticsJob, JobStatus
         with SessionLocal() as db:
             db.add(AnalyticsJob(
                 job_id=job_id,
-                filename=f"RTSP: {req.rtsp_url}",
+                filename=f"RTSP: {ai_url}",
                 status=JobStatus.PROCESSING,
                 progress=0,
             ))
@@ -162,24 +186,26 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
     except Exception:
         pass
 
-    dataset_url = req.dataset_rtsp_url or req.rtsp_url
-
-    # Determine camera_id from rtsp_url for retail state updates
-    cam_id = req.camera_id if req.camera_id != "unknown" else "unknown"
-    for cam in ALL_CAMERAS:
-        if f"{RTSP_BASE}{cam['channel']}" == req.rtsp_url:
-            cam_id = cam["id"]
-            break
-
     threading.Thread(
         target=_run_analysis,
-        args=(req.rtsp_url, job_id, zones_data, entry_zone_pts, exit_zone_pts, req.conf),
-        kwargs={"mode": req.mode, "dataset_rtsp_url": dataset_url,
-                "camera_id": cam_id, "camera_name": req.camera_name or cam_id},
+        args=(ai_url, job_id, zones_data, entry_zone_pts, exit_zone_pts, req.conf),
+        kwargs={
+            "mode":             req.mode,
+            "dataset_rtsp_url": face_url,
+            "camera_id":        cam_id,
+            "camera_name":      req.camera_name or cam_id,
+        },
         daemon=True,
     ).start()
 
-    return {"status": "processing", "job_id": job_id, "rtsp_url": req.rtsp_url, "mode": req.mode}
+    return {
+        "status":      "processing",
+        "job_id":      job_id,
+        "ai_url":      ai_url,
+        "face_url":    face_url or None,
+        "stream_type": req.stream_type,
+        "mode":        req.mode,
+    }
 
 
 @router.get("/rtsp/status")
@@ -637,6 +663,22 @@ async def stop_rtsp_job(job_id: str):
     return {"status": "stopped", "job_id": job_id}
 
 
+@router.post("/zones/reload")
+async def reload_zones():
+    """Hot-reload polygon zones for all running camera pipelines.
+    Call this after saving/updating zones in the frontend zone editor.
+    """
+    from app.services.analytics_service import _active_pipelines
+    reloaded = []
+    for cam_id, pipeline in _active_pipelines.items():
+        try:
+            pipeline.reload_zones()
+            reloaded.append({"camera_id": cam_id, "zones": len(pipeline._zones)})
+        except Exception as e:
+            reloaded.append({"camera_id": cam_id, "error": str(e)})
+    return {"reloaded": reloaded, "total": len(reloaded)}
+
+
 @router.post("/rtsp/stop-all")
 async def stop_all_rtsp_jobs():
     """Stop all active RTSP analytics jobs."""
@@ -663,12 +705,20 @@ async def stop_all_rtsp_jobs():
 
 
 @router.get("/rtsp/preview-frame")
-async def rtsp_preview_frame(rtsp_url: str):
-    """Grab a single frame from the RTSP stream and return as JPEG (for zone drawing)."""
+async def rtsp_preview_frame(rtsp_url: str = "", camera_id: str = "", stream_type: str = "sub"):
+    """Grab a single frame from RTSP stream as JPEG (for zone drawing).
+    Pass either rtsp_url directly, or camera_id + stream_type (sub/main).
+    """
     import cv2, os
     from fastapi import HTTPException
     from fastapi.responses import Response
 
+    if not rtsp_url:
+        cam_meta = next((c for c in ALL_CAMERAS if c["id"] == camera_id), None)
+        if not cam_meta:
+            raise HTTPException(400, "Provide rtsp_url or valid camera_id")
+        channel  = cam_meta["main_channel"] if stream_type == "main" else cam_meta["sub_channel"]
+        rtsp_url = f"{RTSP_BASE}{channel}"
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|buffer_size;2000000"
     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
     if not cap.isOpened():

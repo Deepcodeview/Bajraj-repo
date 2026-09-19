@@ -16,7 +16,9 @@ from app.config import (
     DATASET_COLLECT, DATASET_DIR, DATASET_SAVE_EVERY_N,
     SHELF_MODEL_PATH, SHELF_EMPTY_MODEL_PATH, OUT_OF_STOCK_MODEL_PATH, PHONE_MODEL_PATH,
     STREAM_JPEG_QUALITY, STREAM_RESIZE_WIDTH,
-    CROWD_THRESH, QUEUE_ZONE_THRESH, LOITERING_THRESH_SEC, LOITERING_EXEMPT_CAMERAS,
+    STREAM_PUSHER_FPS, STREAM_PUSHER_QUALITY, STREAM_PUSHER_WIDTH,
+    CROWD_THRESH, QUEUE_ZONE_THRESH, LOITERING_THRESH_SEC, LOITERING_EXEMPT_CAMERAS, OUTDOOR_CAMERAS, PERSON_CAMERAS,
+    VEHICLE_MODEL_PATH,
     SHOW_CONFIDENCE, HEATMAP_ALPHA, DEVICE,
 )
 from app.models.tracker import Tracker
@@ -28,7 +30,67 @@ from app.services.person_pipeline import PersonPipeline
 
 log = logging.getLogger(__name__)
 
-REID_EVERY_N = 5
+REID_EVERY_N = 10
+
+# ── Active pipelines registry — camera_id → PersonPipeline (for hot-reload) ──
+_active_pipelines: dict = {}
+
+# ── Shared model singletons — loaded once, reused by all 8 camera threads ─────
+_person_model      = None
+_person_model_lock = threading.Lock()
+
+_vehicle_model      = None
+_vehicle_model_lock = threading.Lock()
+
+_phone_model      = None
+_phone_model_lock = threading.Lock()
+
+_oos_model      = None
+_oos_model_lock = threading.Lock()
+
+
+def _get_person_model() -> YOLO:
+    global _person_model
+    if _person_model is None:
+        with _person_model_lock:
+            if _person_model is None:
+                log.info("[singleton] Loading shared YOLO person model...")
+                _person_model = YOLO(PERSON_MODEL_PATH)
+                log.info("[singleton] Person model ready.")
+    return _person_model
+
+
+def _get_vehicle_model() -> YOLO:
+    global _vehicle_model
+    if _vehicle_model is None:
+        with _vehicle_model_lock:
+            if _vehicle_model is None:
+                log.info("[singleton] Loading shared vehicle model...")
+                _vehicle_model = YOLO(VEHICLE_MODEL_PATH)
+                log.info("[singleton] Vehicle model ready.")
+    return _vehicle_model
+
+
+def _get_phone_model():
+    global _phone_model
+    if _phone_model is None:
+        with _phone_model_lock:
+            if _phone_model is None and os.path.exists(PHONE_MODEL_PATH):
+                log.info("[singleton] Loading shared phone model...")
+                _phone_model = YOLO(PHONE_MODEL_PATH)
+                log.info("[singleton] Phone model ready.")
+    return _phone_model
+
+
+def _get_oos_model():
+    global _oos_model
+    if _oos_model is None:
+        with _oos_model_lock:
+            if _oos_model is None and os.path.exists(OUT_OF_STOCK_MODEL_PATH):
+                log.info("[singleton] Loading shared out_of_stock model...")
+                _oos_model = YOLO(OUT_OF_STOCK_MODEL_PATH)
+                log.info("[singleton] OOS model ready.")
+    return _oos_model
 
 
 # ── Background threads ────────────────────────────────────────────────────────
@@ -47,6 +109,35 @@ def _dataset_writer_thread(save_queue: queue.Queue):
         except Exception:
             pass
         save_queue.task_done()
+
+
+def _stream_pusher_thread(job_id: str, annotated_holder: list, stop_event: threading.Event):
+    """
+    Independent 30-FPS stream pusher.
+    Reads latest annotated frame from holder, encodes JPEG, pushes to WebSocket subscribers.
+    Completely decoupled from AI — runs at constant FPS regardless of AI speed.
+    """
+    interval = 1.0 / STREAM_PUSHER_FPS
+    from app.utils.streamer import frame_streamer
+    while not stop_event.is_set():
+        t0 = time.time()
+        frame = annotated_holder[0]
+        if frame is not None:
+            try:
+                h, w = frame.shape[:2]
+                if w > STREAM_PUSHER_WIDTH:
+                    scale = STREAM_PUSHER_WIDTH / w
+                    frame = cv2.resize(frame, (STREAM_PUSHER_WIDTH, int(h * scale)),
+                                       interpolation=cv2.INTER_LINEAR)
+                _, buf = cv2.imencode(".jpg", frame,
+                                      [cv2.IMWRITE_JPEG_QUALITY, STREAM_PUSHER_QUALITY])
+                frame_streamer.put(job_id, buf.tobytes())
+            except Exception:
+                pass
+        elapsed = time.time() - t0
+        sleep_t = interval - elapsed
+        if sleep_t > 0:
+            stop_event.wait(timeout=sleep_t)
 
 
 def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: threading.Event):
@@ -169,41 +260,35 @@ def process_video(
         log.info(f"[{job_id}] RTSP connected. Loading YOLO...")
 
     # ── Load models ───────────────────────────────────────────────────────────
-    log.info(f"[{job_id}] Loading YOLO person model...")
-    person_model = YOLO(PERSON_MODEL_PATH)
+    person_model = _get_person_model()
 
-    vehicle_model = YOLO(VEHICLE_MODEL_PATH) if not is_indoor else None
-    log.info(f"[{job_id}] Vehicle model {'loaded' if vehicle_model else 'skipped (indoor)'}")
+    is_outdoor = camera_id in OUTDOOR_CAMERAS
+    vehicle_model = _get_vehicle_model() if is_outdoor else None
+    log.info(f"[{job_id}] Vehicle model {'ready' if vehicle_model else 'skipped'}")
 
-    phone_model = None
-    if os.path.exists(PHONE_MODEL_PATH):
-        phone_model = YOLO(PHONE_MODEL_PATH)
-        log.info(f"[{job_id}] Phone model loaded.")
+    phone_model = _get_phone_model() if camera_id not in OUTDOOR_CAMERAS else None
+    if phone_model:
+        log.info(f"[{job_id}] Phone model ready.")
 
     shelf_detector = None
     shelf_result   = {"status": "NO SHELF DETECTED", "occupied": 0, "available": 0,
                       "occupancy": 0.0, "empty_zones": 0, "reduced_zones": 0}
     if camera_id == "cam3":
-        slot_m       = YOLO(SHELF_MODEL_PATH)         if os.path.exists(SHELF_MODEL_PATH)         else None
-        empty_m      = YOLO(SHELF_EMPTY_MODEL_PATH)   if os.path.exists(SHELF_EMPTY_MODEL_PATH)   else None
-        out_of_stock = YOLO(OUT_OF_STOCK_MODEL_PATH)  if os.path.exists(OUT_OF_STOCK_MODEL_PATH)  else None
-        if slot_m or empty_m or out_of_stock:
-            shelf_detector = ShelfDetector(slot_m, empty_m, out_of_stock)
-            log.info(f"[{job_id}] Shelf models loaded (out_of_stock={'yes' if out_of_stock else 'no'}).")
+        oos = _get_oos_model()
+        if oos:
+            shelf_detector = ShelfDetector(None, None, oos)
+            log.info(f"[{job_id}] Shelf detector ready: out_of_stock.pt")
+        else:
+            log.warning(f"[{job_id}] out_of_stock.pt not found")
 
     # ── Open cap (non-RTSP) ───────────────────────────────────────────────────
     if is_rtsp:
         log.info(f"[{job_id}] Draining stale RTSP frames...")
-        drained = 0
-        for _ in range(60):
+        for _ in range(5):   # sirf 5 frames drain — fast start
             ret, _f = cap.read()
-            drained += 1
             if ret and _f is not None:
-                import numpy as _np
-                _stream(job_id, _f)  # stream immediately during drain
-                if _f.mean() > 5.0 and _np.std(_f) > 5.0:
-                    log.info(f"[{job_id}] Valid keyframe found after {drained} drain frames.")
-                    break
+                annotated_holder[0] = _f  # pehle frame se hi stream shuru
+                break
     else:
         try:
             source = int(video_path)
@@ -225,6 +310,7 @@ def process_video(
     frame_queue  = queue.Queue(maxsize=2)   # small — always process latest frame
     main_stop    = stop_event
     frame_holder = [None]
+    annotated_holder = [None]  # AI writes latest annotated frame here
 
     threading.Thread(target=_dataset_writer_thread, args=(save_queue,), daemon=True).start()
 
@@ -236,6 +322,15 @@ def process_video(
         name=f"frame-reader-{camera_id}",
     ).start()
     log.info(f"[{job_id}] Frame reader thread started.")
+
+    # Independent stream pusher — 30 FPS, decoupled from AI
+    threading.Thread(
+        target=_stream_pusher_thread,
+        args=(job_id, annotated_holder, main_stop),
+        daemon=True,
+        name=f"stream-pusher-{camera_id}",
+    ).start()
+    log.info(f"[{job_id}] Stream pusher thread started.")
 
     # Main stream reader: indoor cameras — high-res frame for face recognition
     use_main_stream = bool(dataset_rtsp_url and is_indoor)
@@ -254,6 +349,7 @@ def process_video(
     # CAMERA → PERSON DETECTION → PERSON TRACKING → PERSON ID
     # → FACE DETECTION + BODY TRACKING → ZONE ENGINE → Dwell/Journey/Heatmap
     pipeline = PersonPipeline(camera_id=camera_id, camera_name=camera_name)
+    _active_pipelines[camera_id] = pipeline
 
     frame_count   = 0
     last_progress = -1
@@ -277,9 +373,8 @@ def process_video(
 
             frame_count += 1
 
-            # Stream raw frame immediately so browser sees video even before AI processes
-            if frame_count % 3 == 0:
-                _stream(job_id, frame)
+            # Stream raw frame immediately — browser sees video instantly
+            annotated_holder[0] = frame
 
             if frame_count % ANNOTATION_SKIP_FRAMES != 0:
                 continue
@@ -291,8 +386,8 @@ def process_video(
                     if progress_cb:
                         progress_cb(pct)
 
-            # ── OUTDOOR mode: Vehicle detection only ─────────────────────────
-            if not is_indoor and not is_vehicle:
+            # ── OUTDOOR mode (cam1, cam4, cam5): Vehicle detection ──────────
+            if is_outdoor:
                 VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck
                 VEHICLE_LABELS  = {2: "Car", 3: "Moto", 5: "Bus", 7: "Truck"}
                 out_results = vehicle_model(
@@ -315,7 +410,7 @@ def process_video(
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA)
                 cv2.putText(annotated, f"Vehicles: {out_count}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 255), 2)
-                _stream(job_id, annotated)
+                annotated_holder[0] = annotated
                 if frame_count % 15 == 0 and progress_cb:
                     _cb(progress_cb, last_progress, out_count, out_count, 0, 0,
                         shelf_result, mode, 0, 0, {}, {}, False, False, False, 0,
@@ -377,70 +472,14 @@ def process_video(
                                     ))
                     except Exception as e:
                         log.error(f"[{job_id}] Vehicle dataset save error: {e}")
-                _stream(job_id, frame)
+                annotated_holder[0] = frame
                 if frame_count % 15 == 0 and progress_cb:
                     _cb(progress_cb, last_progress, v_count, v_count, 0, 0,
                         shelf_result, mode, 0, 0, {}, {}, False, False, False, 0)
                 continue
-                try:
-                    from app.face.recognizer import FaceRecognizer
-                    fr = FaceRecognizer.get()
-                    if fr.index is not None:
-                        frame, _ = fr.process_frame(frame)
-                except Exception:
-                    pass
-
-                # Dataset collection for outdoor cameras (cam7 etc.)
-                if DATASET_COLLECT and frame_count % DATASET_SAVE_EVERY_N == 0:
-                    try:
-                        from app.routers.camera import is_dataset_enabled
-                        if is_dataset_enabled(camera_id):
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            if cv2.Laplacian(gray, cv2.CV_64F).var() >= 50 and gray.std() >= 10:
-                                import datetime
-                                # Run YOLO to get person bboxes for labels
-                                out_results  = person_model(
-                                    frame, conf=conf, classes=[PERSON_CLASS_ID],
-                                    verbose=False, device=DEVICE
-                                )[0]
-                                out_tracked  = sv.Detections.from_ultralytics(out_results)
-                                sf    = cv2.resize(frame, (1280, 720))
-                                today = datetime.datetime.now().strftime("%Y-%m-%d")
-                                ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
-                                idir  = os.path.join(DATASET_DIR, camera_id, today, "images")
-                                ldir  = os.path.join(DATASET_DIR, camera_id, today, "labels")
-                                os.makedirs(idir, exist_ok=True)
-                                os.makedirs(ldir, exist_ok=True)
-                                fname  = f"{camera_id}_{ts}"
-                                h_s, w_s = sf.shape[:2]
-                                sx, sy   = w_s / frame.shape[1], h_s / frame.shape[0]
-                                yolo_lbl = ""
-                                if out_tracked.xyxy is not None:
-                                    for box in out_tracked.xyxy:
-                                        x1,y1,x2,y2 = box
-                                        yolo_lbl += (
-                                            f"0 {((x1+x2)/2*sx)/w_s:.6f} "
-                                            f"{((y1+y2)/2*sy)/h_s:.6f} "
-                                            f"{((x2-x1)*sx)/w_s:.6f} "
-                                            f"{((y2-y1)*sy)/h_s:.6f}\n"
-                                        )
-                                if not save_queue.full():
-                                    save_queue.put_nowait((
-                                        os.path.join(idir, f"{fname}.jpg"),
-                                        os.path.join(ldir, f"{fname}.txt"),
-                                        sf, yolo_lbl,
-                                    ))
-                    except Exception as e:
-                        log.error(f"[{job_id}] Outdoor dataset save error: {e}")
-
-                _stream(job_id, frame)
-                if frame_count % 15 == 0 and progress_cb:
-                    _cb(progress_cb, last_progress, 0, 0, 0, 0, shelf_result,
-                        mode, 0, 0, {}, {}, False, False, False, 0)
-                continue
 
             # ── STEP 1: PERSON DETECTION (YOLO) ──────────────────────────────
-            detect_conf = 0.55 if camera_id in ("cam2", "cam3", "cam6", "cam7", "cam8") else conf
+            detect_conf = 0.40 if camera_id in PERSON_CAMERAS else conf
             results     = person_model(
                 frame, conf=detect_conf, classes=[PERSON_CLASS_ID],
                 verbose=False, device=DEVICE, iou=0.35
@@ -497,6 +536,8 @@ def process_video(
             if shelf_detector is not None and frame_count % 5 == 0:
                 try:
                     shelf_result = shelf_detector.detect(frame)
+                    from app.services.alert_engine import alert_engine as _ae
+                    _ae.check_shelf_empty(camera_id, shelf_result["status"], pipeline.store_id)
                 except Exception as e:
                     log.warning(f"[{job_id}] Shelf error: {e}")
 
@@ -562,6 +603,8 @@ def process_video(
                                 detected_emp.add(gid)
                                 phone_alert = True
                                 phone_count += 1
+                                from app.services.alert_engine import alert_engine as _ae
+                                _ae.check_phone_usage(gid, camera_id, pipeline.store_id)
                                 cv2.rectangle(annotated, (px1, py1), (px2, py2), (0,0,255), 2)
                                 lbl = f"{name_anchor.get_name(gid)}: Using Phone"
                                 cv2.rectangle(annotated, (px1, py1-24),
@@ -578,7 +621,7 @@ def process_video(
                     log.debug(f"[{job_id}] Phone detection skipped: {_pe}")
 
             # ── Stream frame ──────────────────────────────────────────────────
-            _stream(job_id, annotated)
+            annotated_holder[0] = annotated
 
             # ── Dataset collection ────────────────────────────────────────────
             if DATASET_COLLECT and frame_count % DATASET_SAVE_EVERY_N == 0:
@@ -619,6 +662,11 @@ def process_video(
                 except Exception as e:
                     log.error(f"[{job_id}] Dataset save error: {e}")
 
+            # ── Footfall snapshot → SQLite every 30 frames ────────────────────
+            if frame_count % 30 == 0:
+                _save_footfall(camera_id, entries, exits, currently_inside,
+                               tracker.total_unique_people)
+
             # ── Progress callback ─────────────────────────────────────────────
             if frame_count % 15 == 0 and progress_cb:
                 _cb(progress_cb, last_progress,
@@ -632,6 +680,7 @@ def process_video(
     finally:
         main_stop.set()
         save_queue.put(None)
+        _active_pipelines.pop(camera_id, None)
         # cap released by frame_reader_thread
 
     processing_time = round(time.time() - video_start, 1)
@@ -714,3 +763,19 @@ def _assign_zone(cx: float, cy: float) -> str:
     row = "Top" if cy < 0.33 else "Mid" if cy < 0.66 else "Bottom"
     col = "Left" if cx < 0.33 else "Center" if cx < 0.66 else "Right"
     return f"{row}-{col}"
+
+
+def _save_footfall(camera_id: str, entries: int, exits: int,
+                   currently_inside: int, total_unique: int):
+    """Persist footfall snapshot to PostgreSQL via Node.js."""
+    import threading
+    def _run():
+        try:
+            from datetime import datetime, timezone, timedelta
+            from app.services.pg_sync import sync_footfall
+            IST = timezone(timedelta(hours=5, minutes=30))
+            today = datetime.now(IST).strftime("%Y-%m-%d")
+            sync_footfall(camera_id, "store_1", today, entries, exits, currently_inside, total_unique)
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()

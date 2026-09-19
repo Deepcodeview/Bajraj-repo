@@ -28,12 +28,15 @@ _db_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="alert_db")
 log = logging.getLogger("AlertEngine")
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
-LOITERING_SEC        = 120    # person in same zone > 2 min → loitering
-CROWD_THRESHOLD      = 8      # people in one zone > 8 → crowd alert
-QUEUE_THRESHOLD      = 3      # people in billing zone > 3 → queue alert
-SHELF_INTERACT_SEC   = 10     # person near shelf > 10s → shelf interaction
-REPEAT_VISIT_DAYS    = 1      # same person seen again within N days → repeat visit
-ALERT_COOLDOWN_SEC   = 60     # same alert type per zone per minute
+LOITERING_SEC          = 300  # dwell >= 300s → loitering (CAM-6, CAM-7, CAM-8)
+CROWD_THRESHOLD        = 8    # people in one zone >= 8 → crowd alert
+QUEUE_THRESHOLD        = 4    # people in billing zone >= 4 → queue alert
+SHELF_INTERACT_SEC     = 10   # person near shelf > 10s → shelf interaction
+SHELF_EMPTY_SEC        = 30   # shelf EMPTY/LOW STOCK sustained >= 30s → alert
+PHONE_DETECT_THRESH    = 5    # phone detected >= 5 times for same person → alert
+STRANGER_DETECT_THRESH = 5    # unknown face seen >= 5 times on same camera → alert
+REPEAT_VISIT_DAYS      = 1    # same person seen again within N days → repeat visit
+ALERT_COOLDOWN_SEC     = 60   # same alert type per zone per minute
 
 
 class AlertEngine:
@@ -59,6 +62,15 @@ class AlertEngine:
 
         # global_id → entry_time
         self._entry_times: dict[int, float] = {}
+
+        # camera_id → timestamp when shelf first went EMPTY/LOW STOCK
+        self._shelf_empty_since: dict[str, float] = {}
+
+        # (camera_id, global_id) → phone detection hit count
+        self._phone_hits: dict[tuple, int] = {}
+
+        # (camera_id, global_id) → unknown-face detection hit count
+        self._stranger_hits: dict[tuple, int] = {}
 
     # ── Zone Entry/Exit ───────────────────────────────────────────────────────
 
@@ -101,6 +113,8 @@ class AlertEngine:
             journey = self._journeys.pop(global_id, [])
             entry_t = self._entry_times.pop(global_id, None)
             self._zone_entry.pop(global_id, None)
+            self._phone_hits    = {k: v for k, v in self._phone_hits.items()    if k[1] != global_id}
+            self._stranger_hits = {k: v for k, v in self._stranger_hits.items() if k[1] != global_id}
 
         if not journey:
             return
@@ -189,6 +203,65 @@ class AlertEngine:
                 metadata={"count": count},
             )
 
+    def check_shelf_empty(self, camera_id: str, status: str, store_id: str = "store_1"):
+        """Call after each shelf detection. Fires when shelf stays EMPTY/LOW STOCK >= SHELF_EMPTY_SEC."""
+        now = time.time()
+        with self._lock:
+            if status in ("EMPTY", "LOW STOCK"):
+                if camera_id not in self._shelf_empty_since:
+                    self._shelf_empty_since[camera_id] = now
+                duration = now - self._shelf_empty_since[camera_id]
+            else:
+                self._shelf_empty_since.pop(camera_id, None)
+                return
+        if duration >= SHELF_EMPTY_SEC:
+            self._fire_alert(
+                alert_type="shelf_empty",
+                severity="HIGH",
+                camera_id=camera_id,
+                zone=None,
+                global_id=None,
+                message=f"Shelf {status} on {camera_id} for {int(duration)}s",
+                store_id=store_id,
+                metadata={"status": status, "duration_sec": round(duration, 1)},
+            )
+
+    def check_phone_usage(self, global_id: int, camera_id: str, store_id: str = "store_1"):
+        """Increment hit count; fire alert when >= PHONE_DETECT_THRESH detections."""
+        key = (camera_id, global_id)
+        with self._lock:
+            self._phone_hits[key] = self._phone_hits.get(key, 0) + 1
+            count = self._phone_hits[key]
+        if count >= PHONE_DETECT_THRESH:
+            self._fire_alert(
+                alert_type="phone_usage",
+                severity="MEDIUM",
+                camera_id=camera_id,
+                zone=None,
+                global_id=global_id,
+                message=f"Person {global_id} using phone on {camera_id} ({count} detections)",
+                store_id=store_id,
+                metadata={"detections": count},
+            )
+
+    def check_stranger(self, global_id: int, camera_id: str, store_id: str = "store_1"):
+        """Increment unknown-face hit count; fire alert when >= STRANGER_DETECT_THRESH."""
+        key = (camera_id, global_id)
+        with self._lock:
+            self._stranger_hits[key] = self._stranger_hits.get(key, 0) + 1
+            count = self._stranger_hits[key]
+        if count >= STRANGER_DETECT_THRESH:
+            self._fire_alert(
+                alert_type="stranger",
+                severity="HIGH",
+                camera_id=camera_id,
+                zone=None,
+                global_id=global_id,
+                message=f"Unknown person {global_id} seen {count} times on {camera_id}",
+                store_id=store_id,
+                metadata={"detections": count},
+            )
+
     def check_shelf_interaction(self, global_id: int, zone: str, camera_id: str,
                                  dwell_sec: float, store_id: str = "store_1"):
         """Call when person is near shelf zone."""
@@ -250,15 +323,9 @@ alert_engine = AlertEngine()
 def _save_alert(alert_type, severity, camera_id, zone, global_id, message, metadata, store_id):
     def _run():
         try:
-            from app.database.db import SessionLocal
-            from app.database.models import AlertEngineLog
-            with SessionLocal() as db:
-                db.add(AlertEngineLog(
-                    store_id=store_id, alert_type=alert_type, severity=severity,
-                    camera_id=camera_id, zone=zone, global_id=global_id,
-                    message=message, extra_data=metadata,
-                ))
-                db.commit()
+            from app.services.pg_sync import sync_alert
+            sync_alert(alert_type, severity, camera_id or "", zone or "",
+                       global_id, message, metadata or {}, store_id)
         except Exception as e:
             log.debug(f"Alert DB save failed: {e}")
     _db_executor.submit(_run)
@@ -267,14 +334,10 @@ def _save_alert(alert_type, severity, camera_id, zone, global_id, message, metad
 def _save_loitering(global_id, camera_id, zone, dwell_sec, store_id):
     def _run():
         try:
-            from app.database.db import SessionLocal
-            from app.database.models import LoiteringAlert
-            with SessionLocal() as db:
-                db.add(LoiteringAlert(
-                    store_id=store_id, global_id=global_id,
-                    camera_id=camera_id, zone=zone, dwell_sec=round(dwell_sec, 1),
-                ))
-                db.commit()
+            from app.services.pg_sync import sync_alert
+            sync_alert("loitering", "HIGH", camera_id, zone or "",
+                       global_id, f"Loitering {int(dwell_sec)}s",
+                       {"dwell_sec": round(dwell_sec, 1)}, store_id)
         except Exception as e:
             log.debug(f"Loitering DB save failed: {e}")
     _db_executor.submit(_run)
@@ -283,14 +346,10 @@ def _save_loitering(global_id, camera_id, zone, dwell_sec, store_id):
 def _save_shelf_interaction(global_id, camera_id, zone, interaction, dwell_sec, store_id):
     def _run():
         try:
-            from app.database.db import SessionLocal
-            from app.database.models import ShelfInteractionLog
-            with SessionLocal() as db:
-                db.add(ShelfInteractionLog(
-                    store_id=store_id, global_id=global_id, camera_id=camera_id,
-                    zone=zone, interaction=interaction, dwell_sec=round(dwell_sec, 1),
-                ))
-                db.commit()
+            from app.services.pg_sync import sync_alert
+            sync_alert("shelf_interaction", "LOW", camera_id, zone or "",
+                       global_id, f"Shelf {interaction} {int(dwell_sec)}s",
+                       {"interaction": interaction, "dwell_sec": round(dwell_sec, 1)}, store_id)
         except Exception as e:
             log.debug(f"Shelf interaction DB save failed: {e}")
     _db_executor.submit(_run)
@@ -300,16 +359,14 @@ def _save_journey(global_id, journey, total_dwell_sec, zones_visited,
                   entry_time, is_repeat, store_id):
     def _run():
         try:
-            from app.database.db import SessionLocal
-            from app.database.models import CustomerJourney
-            with SessionLocal() as db:
-                db.add(CustomerJourney(
-                    store_id=store_id, global_id=global_id, journey=journey,
-                    total_dwell_sec=round(total_dwell_sec, 1),
-                    zones_visited=zones_visited, entry_time=entry_time,
-                    exit_time=datetime.utcnow(), is_repeat=is_repeat,
-                ))
-                db.commit()
+            from app.services.pg_sync import sync_journey
+            from datetime import datetime
+            exit_now = datetime.utcnow()
+            sync_journey(
+                global_id, journey, round(total_dwell_sec, 1), zones_visited,
+                entry_time.isoformat() if entry_time else None,
+                exit_now.isoformat(), store_id,
+            )
         except Exception as e:
             log.debug(f"Journey DB save failed: {e}")
     _db_executor.submit(_run)

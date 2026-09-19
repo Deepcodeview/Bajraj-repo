@@ -13,6 +13,8 @@ import alertRoutes from "./modules/alerts/alert.routes.js";
 import organizationRoutes from "./modules/organizations/organization.routes.js";
 import zoneRoutes from "./modules/zones/zone.routes.js";
 import reportRoutes from "./modules/reports/report.routes.js";
+import footfallRoutes from "./modules/footfall/footfall.routes.js";
+import aiIngestRoutes from "./modules/ai-ingest/ai-ingest.routes.js";
 
 const app = express();
 
@@ -38,5 +40,7 @@ app.use("/api/alerts", alertRoutes);
 app.use("/api/organizations", organizationRoutes);
 app.use("/api/zones", zoneRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/footfall", footfallRoutes);
+app.use("/api/ai-ingest", aiIngestRoutes);
 
 export default app;

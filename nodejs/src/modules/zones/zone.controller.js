@@ -1,4 +1,4 @@
-import { createZone, getZones, getZoneById, updateZone, deleteZone } from "./zone.service.js";
+import { createZone, getZones, getZoneById, updateZone, updateZonePolygon, deleteZone } from "./zone.service.js";
 
 // Same store-lock pattern as employees: a store-scoped ADMIN can't act
 // outside their own store, regardless of what's in the body/query.
@@ -24,8 +24,9 @@ export async function createZoneController(req, res) {
 
 export async function getZonesController(req, res) {
   try {
-    const storeId = resolveStoreId(req, req.query.storeId);
-    const zones = await getZones(req.user.organizationId, storeId);
+    const storeId    = resolveStoreId(req, req.query.storeId);
+    const cameraCode = req.query.cameraCode || null;
+    const zones = await getZones(req.user.organizationId, storeId, cameraCode);
     return res.status(200).json({ success: true, data: zones });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -52,6 +53,20 @@ export async function updateZoneController(req, res) {
     }
     const zone = await updateZone(req.user.organizationId, req.params.id, req.body);
     return res.status(200).json({ success: true, message: "Zone updated successfully", data: zone });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+}
+
+// PATCH /zones/:id/polygon — dedicated polygon-only update from zone editor UI
+export async function updateZonePolygonController(req, res) {
+  try {
+    const existing = await getZoneById(req.user.organizationId, req.params.id);
+    if (req.user.role === "ADMIN" && req.user.storeId && existing.store_id !== req.user.storeId) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    const zone = await updateZonePolygon(req.user.organizationId, req.params.id, req.body.polygon);
+    return res.status(200).json({ success: true, message: "Polygon saved", data: zone });
   } catch (error) {
     return res.status(400).json({ success: false, message: error.message });
   }

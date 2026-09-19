@@ -338,6 +338,21 @@ class AlertEngineLog(Base):
     wall_time   = Column(DateTime, default=datetime.datetime.utcnow)
 
 
+# ── Footfall Log (people count snapshots) ───────────────────────────────────
+class FootfallLog(Base):
+    __tablename__ = "footfall_logs"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    store_id         = Column(String, index=True, default="store_1")
+    camera_id        = Column(String, index=True)
+    log_date         = Column(String, index=True)   # "YYYY-MM-DD" IST
+    entries          = Column(Integer, default=0)   # cumulative entries since stream start
+    exits            = Column(Integer, default=0)
+    currently_inside = Column(Integer, default=0)
+    total_unique     = Column(Integer, default=0)
+    wall_time        = Column(DateTime, default=datetime.datetime.utcnow)
+
+
 # ── Edge Device Config ────────────────────────────────────────────────────────
 class EdgeDevice(Base):
     __tablename__ = "edge_devices"
