@@ -158,7 +158,7 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
     if req.rtsp_url:
         # Explicit URL provided — use as-is
         ai_url   = req.rtsp_url
-        face_url = req.dataset_rtsp_url or req.rtsp_url
+        face_url = req.dataset_rtsp_url if req.camera_id == "cam6" else ""
     elif cam_meta:
         if req.stream_type == "main":
             # User selected main stream — use main for both AI and face
@@ -173,15 +173,24 @@ async def start_rtsp_analytics(req: RtspAnalyticsRequest):
 
     cam_id = cam_meta["id"] if cam_meta else req.camera_id
 
-    # If this camera already has a running job, stop it first so RTSP socket is released cleanly!
+    # If this camera already has a running active job, return it instead of killing it!
     if cam_id in _camera_active_jobs:
-        old_jid = _camera_active_jobs.pop(cam_id, None)
-        if old_jid:
-            old_evt = _job_stop_events.pop(old_jid, None)
-            if old_evt:
-                old_evt.set()
-            _active_rtsp_jobs.pop(old_jid, None)
-            time.sleep(0.3)
+        existing_jid = _camera_active_jobs[cam_id]
+        existing_evt = _job_stop_events.get(existing_jid)
+        if existing_evt and not existing_evt.is_set():
+            log.info(f"[{existing_jid}] Camera {cam_id} is already actively running. Reusing job.")
+            return {
+                "status":      "processing",
+                "job_id":      existing_jid,
+                "ai_url":      ai_url,
+                "face_url":    face_url or None,
+                "stream_type": req.stream_type,
+                "mode":        req.mode,
+            }
+        # Otherwise clean up finished/stopped job
+        _camera_active_jobs.pop(cam_id, None)
+        _job_stop_events.pop(existing_jid, None)
+        _active_rtsp_jobs.pop(existing_jid, None)
 
     job_id = str(uuid.uuid4())
     stop_event = threading.Event()

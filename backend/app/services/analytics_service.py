@@ -392,8 +392,8 @@ def process_video(
     ).start()
     log.info(f"[{job_id}] Stream pusher thread started.")
 
-    # Main stream reader: indoor cameras — high-res frame for face recognition
-    use_main_stream = bool(dataset_rtsp_url and is_indoor)
+    # Main stream reader: indoor cameras — high-res frame for face recognition (cam6 only)
+    use_main_stream = bool(dataset_rtsp_url and camera_id == "cam6")
     if use_main_stream:
         threading.Thread(
             target=_main_stream_reader_thread,
@@ -420,6 +420,7 @@ def process_video(
     zone_counts_total: dict = {}
 
     try:
+        log.info(f"[{job_id}] Starting AI processing loop for {camera_id} (stop_event.is_set={main_stop.is_set()})")
         while not main_stop.is_set():
             try:
                 frame = frame_queue.get(timeout=2.0)
@@ -432,6 +433,8 @@ def process_video(
                 break  # EOF signal from reader thread
 
             frame_count += 1
+            if frame_count == 1:
+                log.info(f"[{job_id}] Successfully started receiving video frames for {camera_id}!")
 
             # Stream raw frame immediately — browser sees video instantly
             annotated_holder[0] = frame
@@ -741,6 +744,7 @@ def process_video(
         main_stop.set()
         save_queue.put(None)
         _active_pipelines.pop(camera_id, None)
+        log.info(f"[{job_id}] Loop exited for {camera_id}: main_stop.is_set={main_stop.is_set()}, frame_count={frame_count}")
         # cap released by frame_reader_thread
 
     processing_time = round(time.time() - video_start, 1)

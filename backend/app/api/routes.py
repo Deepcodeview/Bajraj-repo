@@ -563,6 +563,15 @@ def _run_analysis(file_path: str, job_id: str, zones_data: list = None,
             log.info(f"[{job_id}] Job completed successfully.")
         else:
             log.info(f"[{job_id}] RTSP stream ended.")
+            try:
+                job = db.query(AnalyticsJob).filter(AnalyticsJob.job_id == job_id).first()
+                if job and job.status == JobStatus.PROCESSING:
+                    job.status       = JobStatus.COMPLETED
+                    job.completed_at = datetime.datetime.utcnow()
+                    job.progress     = 100
+                    db.commit()
+            except Exception:
+                pass
 
     except Exception as exc:
         log.exception(f"[{job_id}] Processing failed: {exc}")
@@ -575,4 +584,12 @@ def _run_analysis(file_path: str, job_id: str, zones_data: list = None,
         except Exception:
             pass
     finally:
+        try:
+            from app.routers.camera import _camera_active_jobs, _job_stop_events, _active_rtsp_jobs
+            _active_rtsp_jobs.pop(job_id, None)
+            _job_stop_events.pop(job_id, None)
+            if camera_id in _camera_active_jobs and _camera_active_jobs[camera_id] == job_id:
+                _camera_active_jobs.pop(camera_id, None)
+        except Exception:
+            pass
         db.close()
