@@ -172,7 +172,8 @@ export function generateSalesPdf(report) {
       panel(doc, x, cardY, cardW, cardH);
       doc.rect(x, cardY, cardW, 3).fill(PALETTE[i % PALETTE.length]);
       doc.fontSize(7.3).fillColor(GRAY).font("Helvetica").text(c.label, x + 8, cardY + 10, { width: cardW - 16 });
-      doc.fontSize(13.5).fillColor(NAVY).font("Helvetica-Bold").text(c.value, x + 8, cardY + 21, { width: cardW - 16 });
+      const valFontSize = c.value.length > 10 ? 9.5 : c.value.length > 7 ? 11 : 13.5;
+      doc.fontSize(valFontSize).fillColor(NAVY).font("Helvetica-Bold").text(c.value, x + 8, cardY + 21, { width: cardW - 16, lineBreak: false, ellipsis: true });
       if (c.pct !== null) {
         doc.fontSize(7).fillColor(trendColor(c.pct)).font("Helvetica-Bold")
            .text(trendArrow(c.pct), x + 8, cardY + 41, { width: cardW - 16, height: 9, ellipsis: true, lineBreak: false });

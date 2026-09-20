@@ -12,16 +12,45 @@ import prisma from "../../config/database.js";
 const VOID_STATUS    = "VOID";
 const PAID_PAYMENT_STATUS = "SUCCESS";
 
-function getDateRange(startDate, endDate) {
+function getDateRange(startDate, endDate, filter) {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  if (!startDate && !endDate) {
-    // Default: current calendar month to date
+
+  if (filter === "today") {
+    return {
+      start: new Date(`${today}T00:00:00+05:30`),
+      end:   new Date(`${today}T23:59:59+05:30`),
+    };
+  }
+
+  if (filter === "week") {
+    const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const day = now.getDay(); // 0=Sun, 1=Mon ...
+    const diffToMon = (day === 0 ? -6 : 1 - day);
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMon);
+    const monStr = monday.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    return {
+      start: new Date(`${monStr}T00:00:00+05:30`),
+      end:   new Date(`${today}T23:59:59+05:30`),
+    };
+  }
+
+  if (filter === "month") {
     const first = today.slice(0, 8) + "01";
     return {
       start: new Date(`${first}T00:00:00+05:30`),
       end:   new Date(`${today}T23:59:59+05:30`),
     };
   }
+
+  if (!startDate && !endDate) {
+    const first = today.slice(0, 8) + "01";
+    return {
+      start: new Date(`${first}T00:00:00+05:30`),
+      end:   new Date(`${today}T23:59:59+05:30`),
+    };
+  }
+
   return {
     start: new Date(`${startDate || today}T00:00:00+05:30`),
     end:   new Date(`${endDate   || today}T23:59:59+05:30`),
@@ -67,8 +96,8 @@ function buildHighlights({ totalSales, prevSales, totalCustomers, prevSessionsCo
   return lines;
 }
 
-export async function getSalesReport(organizationId, { startDate, endDate, storeId }) {
-  const { start, end } = getDateRange(startDate, endDate);
+export async function getSalesReport(organizationId, { startDate, endDate, storeId, filter }) {
+  const { start, end } = getDateRange(startDate, endDate, filter);
   const { start: prevStart, end: prevEnd } = previousPeriod(start, end);
 
   const org = await prisma.organizations.findFirst({ where: { id: organizationId } });

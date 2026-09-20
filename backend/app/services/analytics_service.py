@@ -1,10 +1,24 @@
 import cv2
 import os
+import sys
 import time
 import logging
 import threading
 import queue
 import numpy as np
+from contextlib import contextmanager
+
+@contextmanager
+def _suppress_stderr():
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(devnull)
+        os.close(old_stderr)
 from typing import Callable, Optional
 
 from ultralytics import YOLO
@@ -151,7 +165,8 @@ def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: th
             "|max_delay;1000000|stimeout;35000000"
             "|reorder_queue_size;500|loglevel;quiet"
         )
-        c = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        with _suppress_stderr():
+            c = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
         c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return c
 
@@ -237,7 +252,8 @@ def _frame_reader_thread(
                         "|reorder_queue_size;500|loglevel;quiet"
                     )
                     try:
-                        cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+                        with _suppress_stderr():
+                            cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
                         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     except Exception as ce:
                         log.error(f"[{job_id}] VideoCapture reconnect failed: {ce}")
@@ -306,12 +322,14 @@ def process_video(
             "|reorder_queue_size;500|loglevel;quiet"
         )
         log.info(f"[{job_id}] Opening RTSP stream: {video_path}")
-        cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+        with _suppress_stderr():
+            cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not cap.isOpened():
             log.warning(f"[{job_id}] First RTSP open failed, retrying once...")
             time.sleep(1.0)
-            cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+            with _suppress_stderr():
+                cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         log.info(f"[{job_id}] RTSP stream initialized (isOpened={cap.isOpened()}). Loading YOLO...")
 
@@ -601,6 +619,9 @@ def process_video(
                     shelf_result = shelf_detector.detect(frame)
                     from app.services.alert_engine import alert_engine as _ae
                     _ae.check_shelf_empty(camera_id, shelf_result["status"], pipeline.store_id)
+                    # ── Stock missing report + screenshot ─────────────────────
+                    from app.services.stock_report import maybe_report
+                    maybe_report(camera_id, shelf_result, annotated_holder[0])
                 except Exception as e:
                     log.warning(f"[{job_id}] Shelf error: {e}")
 

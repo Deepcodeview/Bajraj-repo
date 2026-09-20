@@ -3,11 +3,13 @@ import { Download, RefreshCw, Users, UserCheck, UserX, Clock } from 'lucide-reac
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { getAttendanceReport, getAttendanceSummary, getAttendanceTrend, getLiveLog, exportAttendancePdf } from '../Services/Attendanceservice';
+import { useToast } from '../components/Toast';
 import '../Style/dashboard.css';
 
 const statusColor = { Present: { bg: '#dcfce7', color: '#16a34a' }, Absent: { bg: '#fee2e2', color: '#dc2626' }, 'Checked Out': { bg: '#fef9c3', color: '#ca8a04' } };
 
 const Attendance = () => {
+  const toast = useToast();
   const [summary, setSummary]   = useState(null);
   const [report, setReport]     = useState(null);
   const [trend, setTrend]       = useState([]);
@@ -34,6 +36,7 @@ const Attendance = () => {
       setLiveLog(l.data || []);
     } catch (e) {
       setError(e.message);
+      toast(e.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -50,7 +53,7 @@ const Attendance = () => {
       a.href = url; a.download = `attendance-${date}.pdf`; a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     } finally {
       setExporting(false);
     }
@@ -138,7 +141,9 @@ const Attendance = () => {
                         <td style={{ padding: '13px 20px', fontSize: 14, color: '#374151' }}>{r.checkOut || '--'}</td>
                         <td style={{ padding: '13px 20px', fontSize: 14, color: '#374151' }}>{r.duration || '--'}</td>
                         <td style={{ padding: '13px 20px' }}>
-                          <span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, ...(statusColor[r.status] || { bg: '#f3f4f6', color: '#374151' }), background: (statusColor[r.status] || {}).bg }}>
+                          <span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                            background: statusColor[r.status]?.bg || '#f3f4f6',
+                            color: statusColor[r.status]?.color || '#374151' }}>
                             {r.status}
                           </span>
                         </td>
