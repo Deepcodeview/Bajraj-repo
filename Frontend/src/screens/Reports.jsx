@@ -3,11 +3,13 @@ import { FileText, Download, Plus, RefreshCw, Calendar } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { getReportsSummary, getReportsHistory, generateReport, downloadReport, getScheduledReports, createScheduledReport } from '../Services/Reportservice';
+import { useToast } from '../components/Toast';
 import '../Style/dashboard.css';
 
 const REPORT_TYPES = ['attendance', 'employee', 'alert', 'footfall'];
 
 const Reports = () => {
+  const toast = useToast();
   const [summary, setSummary]     = useState(null);
   const [history, setHistory]     = useState([]);
   const [scheduled, setScheduled] = useState([]);
@@ -16,6 +18,7 @@ const Reports = () => {
   const [generating, setGenerating] = useState(false);
   const [genForm, setGenForm]     = useState({ type: 'attendance', date: new Date().toISOString().slice(0, 10) });
   const [showGenModal, setShowGenModal] = useState(false);
+  const [generatedReport, setGeneratedReport] = useState(null);
   const [showSchedModal, setShowSchedModal] = useState(false);
   const [schedForm, setSchedForm] = useState({ name: '', type: 'attendance', frequency: 'daily' });
   const [scheduling, setScheduling] = useState(false);
@@ -44,11 +47,13 @@ const Reports = () => {
     e.preventDefault();
     setGenerating(true);
     try {
-      await generateReport(genForm);
-      setShowGenModal(false);
+      const res = await generateReport(genForm);
+      const newReport = res.data || res;
+      setGeneratedReport(newReport);
+      toast('Report generated successfully');
       load();
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     } finally {
       setGenerating(false);
     }
@@ -61,9 +66,10 @@ const Reports = () => {
       await createScheduledReport(schedForm);
       setShowSchedModal(false);
       setSchedForm({ name: '', type: 'attendance', frequency: 'daily' });
+      toast('Report scheduled successfully');
       load();
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     } finally {
       setScheduling(false);
     }
@@ -76,8 +82,9 @@ const Reports = () => {
       const a = document.createElement('a');
       a.href = url; a.download = `${name}.pdf`; a.click();
       URL.revokeObjectURL(url);
+      toast('Download started');
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     }
   };
 
@@ -216,6 +223,22 @@ const Reports = () => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 400 }}>
             <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>Generate Report</h3>
+            {generatedReport ? (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+                <p style={{ fontSize: 15, fontWeight: 600, color: '#111827', margin: '0 0 6px' }}>Report Generated!</p>
+                <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 20px' }}>{generatedReport.name || 'Your report is ready'}</p>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => { setShowGenModal(false); setGeneratedReport(null); }} style={{ flex: 1, padding: 9, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Close</button>
+                  {generatedReport.id && (
+                    <button onClick={() => { handleDownload(generatedReport.id, generatedReport.name || 'report'); setShowGenModal(false); setGeneratedReport(null); }}
+                      style={{ flex: 1, padding: 9, border: 'none', borderRadius: 8, background: '#2563eb', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <Download size={14} /> Download PDF
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
             <form onSubmit={handleGenerate}>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Report Type</label>
@@ -236,6 +259,7 @@ const Reports = () => {
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}

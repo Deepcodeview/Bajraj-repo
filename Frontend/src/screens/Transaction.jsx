@@ -4,6 +4,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, Res
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { getTransactions, getTransactionSummary, getTransactionTrend, getPaymentMethodSplit, exportTransactions } from '../Services/Transactionservice';
+import { useToast } from '../components/Toast';
 import '../Style/Transaction.css';
 
 const TxCard = ({ children, className = '' }) => <section className={`tx-card ${className}`}>{children}</section>;
@@ -30,6 +31,7 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { style: 'currency', c
 const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--';
 
 export default function Transaction() {
+  const toast = useToast();
   const [period, setPeriod] = useState('Today');
   const [transactions, setTransactions] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -48,7 +50,7 @@ export default function Transaction() {
       a.href = url; a.download = `transactions_${new Date().toISOString().slice(0,10)}.csv`; a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert('Export failed: ' + e.message);
+      toast('Export failed: ' + e.message, 'error');
     } finally {
       setExporting(false);
     }

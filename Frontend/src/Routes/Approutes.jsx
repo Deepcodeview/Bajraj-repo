@@ -11,6 +11,7 @@ import Setting from '../screens/Setting';
 import Employees from '../screens/Employees';
 import Attendance from '../screens/Attendance';
 import Reports from '../screens/Reports';
+import CameraManagement from '../screens/CameraManagement';
 
 const Approutes = () => {
   return (
@@ -23,7 +24,7 @@ const Approutes = () => {
       <Route path="/storeinfo" element={<StoreInfo />} />
       <Route path="/alerts" element={<Alerts />} />
       <Route path="/transactions" element={<Transaction />} />
-      <Route path="/camera-management" element={<AnalyticsScreen type="camera" />} />
+      <Route path="/camera-management" element={<CameraManagement />} />
       <Route path="/ai-configuration" element={<AnalyticsScreen type="ai" />} />
       <Route path="/retail-intelligence" element={<AnalyticsScreen type="intelligence" />} />
       <Route path="/employees" element={<Employees />} />

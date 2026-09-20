@@ -4,11 +4,13 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { getEmployees, createEmployee, updateEmployee, deleteEmployee } from '../Services/Employeeservice';
 import { getStores } from '../Services/StoreInfoservice';
+import { useToast } from '../components/Toast';
 import '../Style/dashboard.css';
 
 const EMPTY_FORM = { firstName: '', lastName: '', employeeCode: '', email: '', phone: '', storeId: '', status: 'ACTIVE' };
 
 const Employees = () => {
+  const toast = useToast();
   const [employees, setEmployees] = useState([]);
   const [stores, setStores]       = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -64,12 +66,16 @@ const Employees = () => {
     setSaving(true);
     setSaveError('');
     try {
-      if (editing) await updateEmployee(editing.id, form);
-      else await createEmployee(form);
+      const payload = { ...form };
+      if (!payload.employeeCode.trim()) delete payload.employeeCode;
+      if (editing) await updateEmployee(editing.id, payload);
+      else await createEmployee(payload);
       setModal(false);
+      toast(editing ? 'Employee updated successfully' : 'Employee added successfully');
       load();
     } catch (e) {
       setSaveError(e.message);
+      toast(e.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -79,9 +85,10 @@ const Employees = () => {
     if (!confirm('Delete this employee?')) return;
     try {
       await deleteEmployee(id);
+      toast('Employee deleted');
       load();
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     }
   };
 
@@ -193,7 +200,7 @@ const Employees = () => {
               {[
                 { label: 'First Name *', key: 'firstName', type: 'text', required: true },
                 { label: 'Last Name',    key: 'lastName',  type: 'text' },
-                { label: 'Employee Code *', key: 'employeeCode', type: 'text', required: true },
+                { label: 'Employee Code', key: 'employeeCode', type: 'text', placeholder: 'Leave blank to auto-generate' },
                 { label: 'Email',  key: 'email', type: 'email' },
                 { label: 'Phone',  key: 'phone', type: 'text' },
               ].map(f => (
@@ -202,6 +209,7 @@ const Employees = () => {
                   <input
                     type={f.type}
                     required={f.required}
+                    placeholder={f.placeholder || ''}
                     value={form[f.key]}
                     onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
                     style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 14, boxSizing: 'border-box', outline: 'none' }}

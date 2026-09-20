@@ -4,6 +4,7 @@ import Header from './Header';
 import { ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { fetchCustomerSessions, fetchCustomerSummary, fetchCustomerReport, getCustomerCount, endCustomerSession } from '../Services/Visitorsservice';
+import { useToast } from '../components/Toast';
 import '../Style/Visitors.css';
 
 const pieData = [
@@ -35,6 +36,7 @@ const heatZones = [
 const journeySteps = ['Entrance', 'Main Floor', 'Fitting Room', 'Billing'];
 
 const Visitors = () => {
+  const toast = useToast();
   const [summary,  setSummary]  = useState(null);
   const [report,   setReport]   = useState(null);
   const [sessions, setSessions] = useState([]);
@@ -62,7 +64,10 @@ const Visitors = () => {
     try {
       await endCustomerSession(id);
       setSessions(p => p.map(s => s.id === id ? { ...s, status: 'COMPLETED' } : s));
-    } catch {}
+      toast('Session ended successfully');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
   };
 
   const totalToday   = summary?.totalVisitors  ?? report?.totalVisitors ?? 128;
