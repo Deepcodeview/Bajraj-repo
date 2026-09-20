@@ -3,6 +3,7 @@ import { AlertTriangle, Info, ChevronLeft, ChevronRight, RefreshCw } from 'lucid
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { getAlerts, acknowledgeAlert, resolveAlert } from '../Services/Alertsservice';
+import { useToast } from '../components/Toast';
 import '../Style/Alerts.css';
 
 const severityDot    = { HIGH: 'dot-red', MEDIUM: 'dot-orange', LOW: 'dot-yellow', CRITICAL: 'dot-red' };
@@ -19,6 +20,7 @@ const AlertIcon = ({ severity }) => {
 const TABS = ['All', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED'];
 
 const Alerts = () => {
+  const toast = useToast();
   const [alerts, setAlerts]     = useState([]);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(true);
@@ -48,11 +50,11 @@ const Alerts = () => {
   const handleTab = (i) => { setActiveTab(i); setPage(1); };
 
   const handleAcknowledge = async (id) => {
-    try { await acknowledgeAlert(id); load(); } catch (e) { alert(e.message); }
+    try { await acknowledgeAlert(id); toast('Alert acknowledged'); load(); } catch (e) { toast(e.message, 'error'); }
   };
 
   const handleResolve = async (id) => {
-    try { await resolveAlert(id); load(); } catch (e) { alert(e.message); }
+    try { await resolveAlert(id); toast('Alert resolved'); load(); } catch (e) { toast(e.message, 'error'); }
   };
 
   const totalPages = Math.ceil(total / LIMIT);

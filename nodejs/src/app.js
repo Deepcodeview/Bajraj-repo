@@ -16,6 +16,7 @@ import reportRoutes from "./modules/reports/report.routes.js";
 import stockReportRoutes from "./modules/stock-reports/stockReport.routes.js";
 import footfallRoutes from "./modules/footfall/footfall.routes.js";
 import aiIngestRoutes from "./modules/ai-ingest/ai-ingest.routes.js";
+import cameraRoutes from "./modules/cameras/camera.routes.js";
 
 const app = express();
 
@@ -44,5 +45,6 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/stock-reports", stockReportRoutes);
 app.use("/api/footfall", footfallRoutes);
 app.use("/api/ai-ingest", aiIngestRoutes);
+app.use("/api/cameras", cameraRoutes);
 
 export default app;

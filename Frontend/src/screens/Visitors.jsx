@@ -3,7 +3,8 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell } from 'recharts';
-import { fetchCustomerSessions, fetchCustomerSummary, fetchCustomerReport } from '../Services/Visitorsservice';
+import { fetchCustomerSessions, fetchCustomerSummary, fetchCustomerReport, getCustomerCount, endCustomerSession } from '../Services/Visitorsservice';
+import { useToast } from '../components/Toast';
 import '../Style/Visitors.css';
 
 const pieData = [
@@ -35,28 +36,42 @@ const heatZones = [
 const journeySteps = ['Entrance', 'Main Floor', 'Fitting Room', 'Billing'];
 
 const Visitors = () => {
+  const toast = useToast();
   const [summary,  setSummary]  = useState(null);
   const [report,   setReport]   = useState(null);
   const [sessions, setSessions] = useState([]);
+  const [liveCount, setLiveCount] = useState(null);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [sessRes, summ, rep] = await Promise.all([
+        const [sessRes, summ, rep, cnt] = await Promise.all([
           fetchCustomerSessions({ limit: 20 }),
           fetchCustomerSummary(),
           fetchCustomerReport(),
+          getCustomerCount(),
         ]);
         setSessions(sessRes?.data || []);
         setSummary(summ || null);
         setReport(rep || null);
+        setLiveCount(cnt?.data?.count ?? cnt?.count ?? null);
       } catch {}
     };
     load();
   }, []);
 
+  const handleEndSession = async (id) => {
+    try {
+      await endCustomerSession(id);
+      setSessions(p => p.map(s => s.id === id ? { ...s, status: 'COMPLETED' } : s));
+      toast('Session ended successfully');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
   const totalToday   = summary?.totalVisitors  ?? report?.totalVisitors ?? 128;
-  const insideNow    = summary?.active          ?? 12;
+  const insideNow    = liveCount ?? summary?.active ?? 12;
   const totalEntries = summary?.totalVisitors   ?? 128;
   const totalExits   = summary?.completed       ?? 116;
   const avgDwell     = summary?.avgDurationMin  ? `${summary.avgDurationMin}m` : '18m 24s';
@@ -86,7 +101,7 @@ const Visitors = () => {
           <div className="vp-stats-row">
             {[
               { label: 'Total Visitors Today', value: totalToday,   trend: '↑18.7%',     trendColor: 'green' },
-              { label: 'Currently Inside',     value: insideNow,    trend: '+Live',       trendColor: 'green' },
+              { label: 'Currently Inside',     value: insideNow,    trend: liveCount !== null ? 'Live count' : '+Live', trendColor: 'green' },
               { label: 'Total Entries',        value: totalEntries, trend: '↑18.7%',     trendColor: 'green' },
               { label: 'Total Exits',          value: totalExits,   trend: '↓12.4%',     trendColor: 'red' },
               { label: 'Avg. Dwell Time',      value: avgDwell,     trend: '↑6.3%',      trendColor: 'green' },
@@ -249,7 +264,7 @@ const Visitors = () => {
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr style={{ borderBottom:'1px solid #e5e7eb', background:'#f9fafb' }}>
-                      {['Session Code','Entry','Exit','Duration','Zone','Employee','Status'].map(h => (
+                      {['Session Code','Entry','Exit','Duration','Zone','Employee','Status','Action'].map(h => (
                         <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#6b7280', fontWeight:600, fontSize:11 }}>{h}</th>
                       ))}
                     </tr>
@@ -270,6 +285,14 @@ const Visitors = () => {
                             border: `1px solid ${r.status==='ACTIVE' ? '#bbf7d0' : '#bfdbfe'}` }}>
                             {r.status}
                           </span>
+                        </td>
+                        <td style={{ padding:'8px 12px' }}>
+                          {r.status === 'ACTIVE' && r.id && (
+                            <button onClick={() => handleEndSession(r.id)}
+                              style={{ fontSize:10, padding:'2px 8px', borderRadius:4, border:'1px solid #fca5a5', background:'#fef2f2', color:'#dc2626', cursor:'pointer' }}>
+                              End
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

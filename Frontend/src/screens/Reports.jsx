@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { FileText, Download, Plus, RefreshCw, Calendar } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { getReportsSummary, getReportsHistory, generateReport, downloadReport, getScheduledReports } from '../Services/Reportservice';
+import { getReportsSummary, getReportsHistory, generateReport, downloadReport, getScheduledReports, createScheduledReport } from '../Services/Reportservice';
+import { useToast } from '../components/Toast';
 import '../Style/dashboard.css';
 
-const REPORT_TYPES = ['attendance', 'employee', 'alert'];
+const REPORT_TYPES = ['attendance', 'employee', 'alert', 'footfall'];
 
 const Reports = () => {
+  const toast = useToast();
   const [summary, setSummary]     = useState(null);
   const [history, setHistory]     = useState([]);
   const [scheduled, setScheduled] = useState([]);
@@ -16,6 +18,10 @@ const Reports = () => {
   const [generating, setGenerating] = useState(false);
   const [genForm, setGenForm]     = useState({ type: 'attendance', date: new Date().toISOString().slice(0, 10) });
   const [showGenModal, setShowGenModal] = useState(false);
+  const [generatedReport, setGeneratedReport] = useState(null);
+  const [showSchedModal, setShowSchedModal] = useState(false);
+  const [schedForm, setSchedForm] = useState({ name: '', type: 'attendance', frequency: 'daily' });
+  const [scheduling, setScheduling] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -41,13 +47,31 @@ const Reports = () => {
     e.preventDefault();
     setGenerating(true);
     try {
-      await generateReport(genForm);
-      setShowGenModal(false);
+      const res = await generateReport(genForm);
+      const newReport = res.data || res;
+      setGeneratedReport(newReport);
+      toast('Report generated successfully');
       load();
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleSchedule = async (e) => {
+    e.preventDefault();
+    setScheduling(true);
+    try {
+      await createScheduledReport(schedForm);
+      setShowSchedModal(false);
+      setSchedForm({ name: '', type: 'attendance', frequency: 'daily' });
+      toast('Report scheduled successfully');
+      load();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setScheduling(false);
     }
   };
 
@@ -58,8 +82,9 @@ const Reports = () => {
       const a = document.createElement('a');
       a.href = url; a.download = `${name}.pdf`; a.click();
       URL.revokeObjectURL(url);
+      toast('Download started');
     } catch (e) {
-      alert(e.message);
+      toast(e.message, 'error');
     }
   };
 
@@ -105,6 +130,9 @@ const Reports = () => {
               </button>
               <button onClick={() => setShowGenModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', border: 'none', borderRadius: 8, background: '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                 <Plus size={15} /> Generate Report
+              </button>
+              <button onClick={() => setShowSchedModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', border: '1px solid #7c3aed', borderRadius: 8, background: '#f5f3ff', color: '#7c3aed', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                <Calendar size={15} /> Schedule
               </button>
             </div>
           </div>
@@ -195,6 +223,22 @@ const Reports = () => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 400 }}>
             <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>Generate Report</h3>
+            {generatedReport ? (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+                <p style={{ fontSize: 15, fontWeight: 600, color: '#111827', margin: '0 0 6px' }}>Report Generated!</p>
+                <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 20px' }}>{generatedReport.name || 'Your report is ready'}</p>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => { setShowGenModal(false); setGeneratedReport(null); }} style={{ flex: 1, padding: 9, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Close</button>
+                  {generatedReport.id && (
+                    <button onClick={() => { handleDownload(generatedReport.id, generatedReport.name || 'report'); setShowGenModal(false); setGeneratedReport(null); }}
+                      style={{ flex: 1, padding: 9, border: 'none', borderRadius: 8, background: '#2563eb', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <Download size={14} /> Download PDF
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
             <form onSubmit={handleGenerate}>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Report Type</label>
@@ -212,6 +256,43 @@ const Reports = () => {
                 <button type="button" onClick={() => setShowGenModal(false)} style={{ flex: 1, padding: 9, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
                 <button type="submit" disabled={generating} style={{ flex: 1, padding: 9, border: 'none', borderRadius: 8, background: '#2563eb', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
                   {generating ? 'Generating...' : 'Generate'}
+                </button>
+              </div>
+            </form>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Schedule Modal */}
+      {showSchedModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 400 }}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>Schedule Report</h3>
+            <form onSubmit={handleSchedule}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Report Name</label>
+                <input required value={schedForm.name} onChange={e => setSchedForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Daily Attendance"
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 14, boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Report Type</label>
+                <select value={schedForm.type} onChange={e => setSchedForm(p => ({ ...p, type: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 14 }}>
+                  {REPORT_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                </select>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Frequency</label>
+                <select value={schedForm.frequency} onChange={e => setSchedForm(p => ({ ...p, frequency: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 14 }}>
+                  {['daily','weekly','monthly'].map(f => <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                <button type="button" onClick={() => setShowSchedModal(false)} style={{ flex: 1, padding: 9, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={scheduling} style={{ flex: 1, padding: 9, border: 'none', borderRadius: 8, background: '#7c3aed', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                  {scheduling ? 'Scheduling...' : 'Schedule'}
                 </button>
               </div>
             </form>

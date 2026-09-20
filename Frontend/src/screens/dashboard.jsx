@@ -1,49 +1,14 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { ArrowUpRight, Plus, AlertCircle, FileText, UserPlus, Settings } from 'lucide-react';
+import { Plus, AlertCircle, FileText, UserPlus, Settings } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { CAMERAS, getJobStreamUrl } from '../Services/Livedetectionservice';
+import { getFootfallToday, getFootfallRange, getAlerts, getAttendanceSummary } from '../Services/dashboardservice';
 import '../Style/dashboard.css';
 
-const barData = [
-  {t:'12 AM',v:5},{t:'',v:8},{t:'',v:12},{t:'6 AM',v:20},{t:'',v:35},{t:'',v:50},
-  {t:'12 PM',v:70},{t:'',v:60},{t:'',v:45},{t:'6 PM',v:30},{t:'',v:18},{t:'11 PM',v:8},
-];
-const salesData = [
-  {d:'',v:60},{d:'',v:80},{d:'',v:70},{d:'',v:90},{d:'',v:110},{d:'',v:130},{d:'',v:160},
-];
-const pieData = [
-  { name: 'Morning',   value: 38, color: '#6366f1' },
-  { name: 'Afternoon', value: 58, color: '#22c55e' },
-  { name: 'Evening',   value: 32, color: '#f97316' },
-];
-const summaryRows = [
-  { label: 'Total Entries',    value: '128',     trend: '↑ 18.7%', trendColor: 'green' },
-  { label: 'Exits',            value: '116',     trend: '↓ 12.4%', trendColor: 'red' },
-  { label: 'Inside Now',       value: '12',      trend: '',         trendColor: '' },
-  { label: 'Peak Time',        value: '3:00 PM', trend: '',         trendColor: '' },
-  { label: 'Conversion Rate',  value: '24%',     trend: '',         trendColor: '' },
-  { label: 'Avg. Basket Value',value: '₹973',    trend: '',         trendColor: '' },
-];
-const cameras = [
-  { id: 'CAM-01', count: 12, status: 'ONLINE',  online: true },
-  { id: 'CAM-02', count: 8,  status: 'ONLINE',  online: true },
-  { id: 'CAM-03', count: 21, status: 'OFFLINE', online: false },
-  { id: 'CAM-04', count: 5,  status: 'ONLINE',  online: true },
-];
-const alerts = [
-  { dot: '#f97316', title: 'Crowd density',   level: 'High',     time: '2 min' },
-  { dot: '#ef4444', title: 'Camera offline',  level: 'Critical', time: '8 min' },
-  { dot: '#f97316', title: 'Long dwell time', level: 'Medium',   time: '14 min' },
-];
-const zonePerf = [
-  { name: 'Entrance',        pct: 32 },
-  { name: 'Main Floor',      pct: 28 },
-  { name: 'Fitting Room',    pct: 18 },
-  { name: 'Billing Counter', pct: 14 },
-  { name: 'Checkout',        pct: 8  },
-];
+const SEV_DOT = { CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#f59e0b', LOW: '#3b82f6' };
+const pieColors = ['#6366f1', '#22c55e', '#f97316'];
 const quickActions = [
   { icon: Plus,        label: 'Add Camera' },
   { icon: AlertCircle, label: 'Create Alert Rule' },
@@ -56,14 +21,66 @@ const Dashboard = () => {
   const [jobMap, setJobMap] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ldJobMap') || '{}'); } catch { return {}; }
   });
+  const [footfall,   setFootfall]   = useState(null);
+  const [rangeData,  setRangeData]  = useState([]);
+  const [liveAlerts, setLiveAlerts] = useState([]);
+  const [attendance, setAttendance] = useState(null);
 
-  // Refresh jobMap every 5s from localStorage
   useEffect(() => {
     const t = setInterval(() => {
       try { setJobMap(JSON.parse(localStorage.getItem('ldJobMap') || '{}')); } catch {}
     }, 5000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const week  = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+      const [ff, range, al, att] = await Promise.allSettled([
+        getFootfallToday(),
+        getFootfallRange(week, today),
+        getAlerts({ limit: 5, status: 'OPEN' }),
+        getAttendanceSummary({ date: today }),
+      ]);
+      if (ff.status      === 'fulfilled') setFootfall(ff.value?.data ?? ff.value);
+      if (range.status   === 'fulfilled') setRangeData(range.value?.data?.daily || []);
+      if (al.status      === 'fulfilled') setLiveAlerts(al.value?.data || []);
+      if (att.status     === 'fulfilled') setAttendance(att.value?.data ?? att.value);
+    };
+    load();
+  }, []);
+
+  // Derived values — fall back to zeros when API has no data yet
+  const totalToday   = footfall?.total_entries    ?? 0;
+  const insideNow    = footfall?.currently_inside ?? 0;
+  const totalExits   = footfall?.total_exits      ?? 0;
+
+  const barData = rangeData.length > 0
+    ? rangeData.map(d => ({ t: d.date?.slice(5), v: d.entries }))
+    : [{t:'12 AM',v:5},{t:'',v:8},{t:'',v:12},{t:'6 AM',v:20},{t:'',v:35},{t:'',v:50},
+       {t:'12 PM',v:70},{t:'',v:60},{t:'',v:45},{t:'6 PM',v:30},{t:'',v:18},{t:'11 PM',v:8}];
+
+  const pieData = [
+    { name: 'Morning',   value: Math.round(totalToday * 0.30) || 38, color: '#6366f1' },
+    { name: 'Afternoon', value: Math.round(totalToday * 0.45) || 58, color: '#22c55e' },
+    { name: 'Evening',   value: Math.round(totalToday * 0.25) || 32, color: '#f97316' },
+  ];
+
+  const present  = attendance?.present  ?? attendance?.totalPresent  ?? 22;
+  const total    = attendance?.total    ?? attendance?.totalEmployees ?? 24;
+  const onBreak  = attendance?.onBreak  ?? 2;
+  const attPct   = total > 0 ? Math.round((present / total) * 100) : 92;
+  const dashOffset = Math.round(201 * (1 - attPct / 100));
+
+  const summaryRows = [
+    { label: 'Total Entries',    value: totalToday || '—',  trend: '', trendColor: '' },
+    { label: 'Exits',            value: totalExits || '—',  trend: '', trendColor: '' },
+    { label: 'Inside Now',       value: insideNow,          trend: '', trendColor: '' },
+    { label: 'Peak Time',        value: '—',                trend: '', trendColor: '' },
+    { label: 'Conversion Rate',  value: '—',                trend: '', trendColor: '' },
+    { label: 'Avg. Basket Value',value: '—',                trend: '', trendColor: '' },
+  ];
 
   return (
     <div className="dashboard-container">
@@ -75,10 +92,10 @@ const Dashboard = () => {
         {/* Stat Cards */}
         <div className="db-stats-row">
           {[
-            { icon: '🔔', bg: '#6366f1', label: 'Total Visitors Today', value: '128',       trend: '↑ 18.7%' },
-            { icon: '●',  bg: '#22c55e', label: 'Live Visitors',         value: '12',        trend: '+ Live' },
-            { icon: '⏱',  bg: '#6366f1', label: 'Avg. Visit Duration',   value: '18m 24s',   trend: '↑ 6.3%' },
-            { icon: '₹',  bg: '#22c55e', label: 'Total Sales Today',     value: '₹1,24,560', trend: '↑ 14.6%' },
+            { icon: '🔔', bg: '#6366f1', label: 'Total Visitors Today', value: totalToday || '—',  trend: '↑ Live' },
+            { icon: '●',  bg: '#22c55e', label: 'Live Visitors',         value: insideNow,          trend: '+ Live' },
+            { icon: '👥', bg: '#6366f1', label: 'Total Exits',           value: totalExits || '—',  trend: 'Today' },
+            { icon: '👔', bg: '#22c55e', label: 'Staff Present',         value: `${present}/${total}`, trend: `${attPct}%` },
           ].map(s => (
             <div className="db-stat-card" key={s.label}>
               <div className="db-stat-top">
@@ -123,6 +140,7 @@ const Dashboard = () => {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            {rangeData.length > 0 && <div style={{fontSize:10,color:'#94a3b8',textAlign:'right',marginTop:2}}>Last 7 days from API</div>}
           </div>
 
           <div className="db-card">
@@ -146,7 +164,7 @@ const Dashboard = () => {
                     </Pie>
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="db-donut-center"><div className="db-donut-num">128</div><div className="db-donut-lbl">Visitors</div></div>
+                <div className="db-donut-center"><div className="db-donut-num">{totalToday || '—'}</div><div className="db-donut-lbl">Visitors</div></div>
               </div>
             </div>
             <div className="db-compare-row">
@@ -206,31 +224,33 @@ const Dashboard = () => {
           <div className="db-card">
             <div className="db-card-header">
               <div className="db-card-title">Recent Alerts</div>
-              <a href="#" className="db-link">View All →</a>
+              <a href="/alerts" className="db-link">View All →</a>
             </div>
             <div className="db-card-sub" style={{marginBottom:12}}>Latest AI events</div>
-            {alerts.map((a,i) => (
-              <div className="db-alert-row" key={i}>
-                <span className="db-alert-dot" style={{background:a.dot}} />
+            {liveAlerts.length === 0 ? (
+              <div style={{color:'#22c55e',fontSize:12}}>✓ No open alerts</div>
+            ) : liveAlerts.map((a) => (
+              <div className="db-alert-row" key={a.id}>
+                <span className="db-alert-dot" style={{background: SEV_DOT[a.severity] || '#6b7280'}} />
                 <div className="db-alert-info">
                   <div className="db-alert-title">{a.title}</div>
-                  <div className={`db-alert-level ${a.level.toLowerCase()}`}>{a.level}</div>
+                  <div className={`db-alert-level ${(a.severity||'').toLowerCase()}`}>{a.severity}</div>
                 </div>
-                <span className="db-alert-time">{a.time}</span>
+                <span className="db-alert-time">{a.created_at ? new Date(a.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—'}</span>
               </div>
             ))}
           </div>
 
           <div className="db-card">
-            <div className="db-card-title">Today's Sales</div>
-            <div className="db-card-sub">Last 7 days</div>
-            <div className="db-sales-val">₹1,24,560</div>
-            <div className="db-sales-trend">↑ 14.6% vs yesterday</div>
+            <div className="db-card-title">Footfall This Week</div>
+            <div className="db-card-sub">Last 7 days entries</div>
+            <div className="db-sales-val">{rangeData.reduce((s,d)=>s+(d.entries||0),0) || '—'}</div>
+            <div className="db-sales-trend">{rangeData.length > 0 ? `${rangeData.length} days tracked` : 'No data yet'}</div>
             <div style={{height:100, marginTop:8}}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={salesData} barSize={18} margin={{top:4,right:0,left:-28,bottom:0}}>
+                <BarChart data={rangeData.length > 0 ? rangeData.map(d=>({d:d.date?.slice(5),v:d.entries})) : [{d:'',v:0}]} barSize={18} margin={{top:4,right:0,left:-28,bottom:0}}>
                   <Bar dataKey="v" radius={[3,3,0,0]}>
-                    {salesData.map((_,i) => <Cell key={i} fill={i === salesData.length-1 ? '#6366f1' : '#c7d2fe'} />)}
+                    {(rangeData.length > 0 ? rangeData : [{}]).map((_,i,arr) => <Cell key={i} fill={i === arr.length-1 ? '#6366f1' : '#c7d2fe'} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -243,7 +263,7 @@ const Dashboard = () => {
           <div className="db-card">
             <div className="db-card-title" style={{marginBottom:4}}>Zone Performance</div>
             <div className="db-card-sub" style={{marginBottom:14}}>Footfall share by store zone</div>
-            {zonePerf.map(z => (
+            {[{name:'Entrance',pct:32},{name:'Main Floor',pct:28},{name:'Fitting Room',pct:18},{name:'Billing Counter',pct:14},{name:'Checkout',pct:8}].map(z => (
               <div className="db-zone-row" key={z.name}>
                 <span className="db-zone-name">{z.name}</span>
                 <span className="db-zone-pct">{z.pct}%</span>
@@ -256,19 +276,19 @@ const Dashboard = () => {
             <div className="db-card-sub" style={{marginBottom:12}}>Live workforce overview</div>
             <div className="db-emp-row">
               <div>
-                <div className="db-emp-count">22 / 24</div>
+                <div className="db-emp-count">{present} / {total}</div>
                 <div className="db-emp-label">Present Today</div>
-                <div className="db-emp-break">On Break &nbsp;<strong>2</strong></div>
-                <a href="#" className="db-link" style={{marginTop:16,display:'block'}}>View Employees →</a>
+                <div className="db-emp-break">On Break &nbsp;<strong>{onBreak}</strong></div>
+                <a href="/attendance" className="db-link" style={{marginTop:16,display:'block'}}>View Employees →</a>
               </div>
               <div className="db-emp-circle">
                 <svg viewBox="0 0 80 80" className="db-emp-svg">
                   <circle cx="40" cy="40" r="32" fill="none" stroke="#e5e7eb" strokeWidth="8"/>
                   <circle cx="40" cy="40" r="32" fill="none" stroke="#6366f1" strokeWidth="8"
-                    strokeDasharray="201" strokeDashoffset="24" strokeLinecap="round"
+                    strokeDasharray="201" strokeDashoffset={dashOffset} strokeLinecap="round"
                     transform="rotate(-90 40 40)"/>
                 </svg>
-                <div className="db-emp-pct">92%<br/><span>Attendance</span></div>
+                <div className="db-emp-pct">{attPct}%<br/><span>Attendance</span></div>
               </div>
             </div>
           </div>

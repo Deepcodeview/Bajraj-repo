@@ -1,27 +1,17 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { createZone, updateZone, deleteZone, fetchCameraZones } from '../Services/ZoneEditorservice';
+import { createZone, updateZone, updateZonePolygon, deleteZone, fetchCameraZones } from '../Services/ZoneEditorservice';
 
 const ZONE_COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16'];
 const ZONE_TYPES  = ['Entrance','Main Floor','Billing Counter','Product Shelf','Exit','Storage','Parking','Custom'];
-
-// Check if point is inside polygon (ray casting)
-function pointInPolygon(px, py, polygon) {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
-    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
+const ZONE_TYPE_MAP = {
+  'Entrance':'ENTRANCE','Main Floor':'SERVICE_ZONE','Billing Counter':'BILLING_COUNTER',
+  'Product Shelf':'SERVICE_ZONE','Exit':'EXIT','Storage':'STAFF_AREA','Parking':'SERVICE_ZONE','Custom':'SERVICE_ZONE',
+};
 
 export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
   const canvasRef    = useRef(null);
-  const overlayRef   = useRef(null);
   const wsRef        = useRef(null);
-  const frameRef     = useRef(null); // latest ImageBitmap
+  const frameRef     = useRef(null);
 
   const [zones, setZones]           = useState([]);
   const [drawing, setDrawing]       = useState(false);
@@ -31,6 +21,10 @@ export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
   const [saving, setSaving]         = useState(false);
   const [streamOk, setStreamOk]     = useState(false);
   const [canvasSize, setCanvasSize] = useState({ w: 854, h: 480 });
+  const [editingZone, setEditingZone] = useState(null); // zone being edited
+  const [editName, setEditName]     = useState('');
+  const [editType, setEditType]     = useState('Entrance');
+  const [repolygonZone, setRepolygonZone] = useState(null); // zone whose polygon is being redrawn
 
   // Load existing zones for this camera
   useEffect(() => {
@@ -149,17 +143,23 @@ export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
     if (!zoneName.trim()) return alert('Zone name required');
     setSaving(true);
     try {
-      const payload = {
-        camera_id:  cam.id,
-        store_id:   storeId,
-        zone_code:  `${cam.id}_${Date.now()}`,
-        name:       zoneName.trim(),
-        zone_type:  zoneType,
-        polygon:    { points: currentPts },
-        status:     'ACTIVE',
-      };
-      const saved = await createZone(payload);
-      setZones(z => [...z, saved]);
+      if (repolygonZone) {
+        // Update polygon only for existing zone
+        const updated = await updateZonePolygon(repolygonZone.id, { points: currentPts });
+        setZones(z => z.map(x => x.id === repolygonZone.id ? { ...x, polygon: updated?.polygon || { points: currentPts } } : x));
+        setRepolygonZone(null);
+      } else {
+        const payload = {
+          cameraId: cam.id, storeId,
+          zoneCode: `${cam.id}_${Date.now()}`,
+          name: zoneName.trim(),
+          zoneType: ZONE_TYPE_MAP[zoneType] || 'SERVICE_ZONE',
+          polygon: { points: currentPts },
+          status: 'ACTIVE',
+        };
+        const saved = await createZone(payload);
+        setZones(z => [...z, saved]);
+      }
       setCurrentPts([]);
       setZoneName('');
       setDrawing(false);
@@ -167,6 +167,14 @@ export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
       alert('Save failed: ' + e.message);
     }
     setSaving(false);
+  };
+
+  const handleUpdateZoneMeta = async (zone) => {
+    try {
+      await updateZone(zone.id, { name: editName.trim(), zoneType: ZONE_TYPE_MAP[editType] || 'SERVICE_ZONE' });
+      setZones(z => z.map(x => x.id === zone.id ? { ...x, name: editName.trim(), zone_type: ZONE_TYPE_MAP[editType] } : x));
+      setEditingZone(null);
+    } catch (e) { alert('Update failed: ' + e.message); }
   };
 
   const handleDeleteZone = async (zoneId) => {
@@ -259,7 +267,7 @@ export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
 
               {!drawing ? (
                 <button
-                  onClick={() => { setDrawing(true); setCurrentPts([]); }}
+                  onClick={() => { setDrawing(true); setCurrentPts([]); setRepolygonZone(null); }}
                   style={{
                     background: '#0057ff', border: 'none', color: '#fff',
                     borderRadius: 6, padding: '7px 0', cursor: 'pointer', fontSize: 12, fontWeight: 600,
@@ -278,7 +286,7 @@ export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
                       opacity: currentPts.length < 3 ? 0.5 : 1,
                     }}
                   >
-                    {saving ? '…' : '✓ Save'}
+                    {saving ? '…' : repolygonZone ? '✓ Update Polygon' : '✓ Save'}
                   </button>
                   <button
                     onClick={() => { setDrawing(false); setCurrentPts([]); }}
@@ -316,20 +324,38 @@ export default function ZoneEditor({ cam, jobId, storeId, onClose }) {
                 {zones.map((z, i) => (
                   <div key={z.id} style={{
                     background: '#1e293b', borderRadius: 6, padding: '6px 10px',
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    display: 'flex', flexDirection: 'column', gap: 4,
                     borderLeft: `3px solid ${ZONE_COLORS[i % ZONE_COLORS.length]}`,
                   }}>
-                    <div>
-                      <div style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600 }}>{z.name}</div>
-                      <div style={{ color: '#64748b', fontSize: 10 }}>{z.zone_type}</div>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteZone(z.id)}
-                      style={{
-                        background: 'none', border: 'none', color: '#ef4444',
-                        cursor: 'pointer', fontSize: 14, padding: '0 4px',
-                      }}
-                    >🗑</button>
+                    {editingZone?.id === z.id ? (
+                      <>
+                        <input value={editName} onChange={e => setEditName(e.target.value)}
+                          style={{ background:'#0f172a', border:'1px solid #334155', borderRadius:4, color:'#f1f5f9', padding:'3px 7px', fontSize:11, outline:'none' }} />
+                        <select value={editType} onChange={e => setEditType(e.target.value)}
+                          style={{ background:'#0f172a', border:'1px solid #334155', borderRadius:4, color:'#f1f5f9', padding:'3px 6px', fontSize:11, outline:'none' }}>
+                          {ZONE_TYPES.map(t => <option key={t}>{t}</option>)}
+                        </select>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <button onClick={() => handleUpdateZoneMeta(z)} style={{ flex:1, background:'#22c55e', border:'none', color:'#fff', borderRadius:4, padding:'3px 0', cursor:'pointer', fontSize:10 }}>Save</button>
+                          <button onClick={() => setEditingZone(null)} style={{ flex:1, background:'#475569', border:'none', color:'#fff', borderRadius:4, padding:'3px 0', cursor:'pointer', fontSize:10 }}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                        <div>
+                          <div style={{ color:'#f1f5f9', fontSize:12, fontWeight:600 }}>{z.name}</div>
+                          <div style={{ color:'#64748b', fontSize:10 }}>{z.zone_type}</div>
+                        </div>
+                        <div style={{ display:'flex', gap:2 }}>
+                          <button onClick={() => { setEditingZone(z); setEditName(z.name); setEditType(Object.keys(ZONE_TYPE_MAP).find(k=>ZONE_TYPE_MAP[k]===z.zone_type)||'Entrance'); }}
+                            style={{ background:'none', border:'none', color:'#94a3b8', cursor:'pointer', fontSize:12, padding:'0 3px' }} title="Edit">✏</button>
+                          <button onClick={() => { setRepolygonZone(z); setZoneName(z.name); setDrawing(true); setCurrentPts([]); }}
+                            style={{ background:'none', border:'none', color:'#f59e0b', cursor:'pointer', fontSize:12, padding:'0 3px' }} title="Redraw polygon">⬡</button>
+                          <button onClick={() => handleDeleteZone(z.id)}
+                            style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14, padding:'0 3px' }}>🗑</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

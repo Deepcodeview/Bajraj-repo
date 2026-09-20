@@ -1,10 +1,24 @@
 import cv2
 import os
+import sys
 import time
 import logging
 import threading
 import queue
 import numpy as np
+from contextlib import contextmanager
+
+@contextmanager
+def _suppress_stderr():
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(devnull)
+        os.close(old_stderr)
 from typing import Callable, Optional
 
 from ultralytics import YOLO
@@ -151,7 +165,8 @@ def _main_stream_reader_thread(rtsp_url: str, frame_holder: list, stop_event: th
             "|max_delay;1000000|stimeout;15000000"
             "|reorder_queue_size;500|loglevel;quiet"
         )
-        c = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        with _suppress_stderr():
+            c = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
         c.set(cv2.CAP_PROP_BUFFERSIZE, 10)
         return c
 
@@ -201,7 +216,8 @@ def _frame_reader_thread(cap, frame_queue: queue.Queue, stop_event: threading.Ev
                         "|max_delay;1000000|stimeout;15000000"
                         "|reorder_queue_size;500|loglevel;quiet"
                     )
-                    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+                    with _suppress_stderr():
+                        cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     consecutive_failures = 0
                 time.sleep(0.05)
@@ -255,7 +271,8 @@ def process_video(
             "|max_delay;1000000|stimeout;15000000"
             "|reorder_queue_size;500|loglevel;quiet"
         )
-        cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+        with _suppress_stderr():
+            cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 10)
         log.info(f"[{job_id}] RTSP connected. Loading YOLO...")
 
